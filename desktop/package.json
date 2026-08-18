@@ -1,0 +1,23 @@
+{
+  "name": "inspect-k8s-desktop",
+  "version": "0.1.0",
+  "description": "inspect-k8s 데스크톱 앱 — Codex 기반 dev k8s 디버그·개발 하네스",
+  "main": "main.js",
+  "author": "genians",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --dir",
+    "dist:dmg": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.genians.inspect-k8s",
+    "productName": "inspect-k8s",
+    "files": ["main.js", "preload.js", "splash.html"],
+    "mac": { "category": "public.app-category.developer-tools", "target": ["dir"] }
+  }
+}

@@ -31,8 +31,10 @@ tools:
 
 ## 소스 지도 (SSH 개발 서버)
 
-- `~/WebstormProjects/nexus-shell` — shell 플랫폼 모노레포(pnpm). `apps/shell`(프론트),
-  `apps/bff`(백엔드 :4000), `apps/remote-demo` 등. 이미지 genian-nexus-shell*.
+- `~/WebstormProjects/nexus-shell` — ★ **nexus-shell 플랫폼의 실제 소스코드**. shell app들이
+  이 플랫폼 위에 연동된다. pnpm 모노레포: `apps/shell`(프론트), `apps/bff`(백엔드 :4000),
+  `apps/remote-demo`, `packages/*`(공유 라이브러리). 이미지 genian-nexus-shell*.
+  nexus-shell 관련 이슈는 반드시 이 플랫폼 소스를 근거로 확인하라 — 앱은 플랫폼의 확장이다.
 - `~/nexus-ai` — AI 어시스턴트/MCP (이미지 nexus-ai). `frontend`, `deploy`, `docs`.
 - `~/nexus-lake` — 데이터레이크(`apps`, `core`): trino/spark/bronze-ingestor/registry-api.
 - `~/WebstormProjects/gsp-service-logs` — gsp-service-logs 앱.
