@@ -107,16 +107,24 @@ class SourceHost:
         )
 
     def repo_log(self, path: str, limit: int = 10) -> str:
-        """git 또는 svn 저장소의 최근 이력을 조회한다 (VCS 자동 감지, 읽기 전용)."""
+        """git 또는 svn 저장소의 최근 이력·동기화 상태를 조회한다 (VCS 자동 감지, 읽기 전용).
+
+        svn 이면 `svn status -u`(--show-updates, 저장소 조회만 하고 쓰지 않음)로
+        작업복사본이 저장소 HEAD 대비 뒤처졌는지 함께 보여준다 — 뒤처진 항목은
+        `*` 표시로 나타나며, 이 경우 분석 결과가 구버전 기준일 수 있다.
+        """
         p = _quote_path(path)
         n = max(1, min(int(limit), 100))
         # .svn(작업복사본)이면 svn log, 아니면 git log — 둘 다 읽기 부속명령만
         return self._ssh(
             f"if [ -d {p}/.svn ] || svn info {p} >/dev/null 2>&1; then "
-            f"svn info {p} 2>&1 | grep -E '^URL|^Revision|Last Changed'; echo '---'; "
+            f"svn info {p} 2>&1 | grep -E '^URL|^Revision|Last Changed'; "
+            f"echo '--- 동기화 상태 (* 표시 = 저장소보다 오래됨, svn update 필요) ---'; "
+            f"svn status -u {p} 2>&1 | tail -6; echo '---'; "
             f"svn log -l {n} {p} 2>&1 | head -80; "
             f"else git -C {p} log --oneline -n {n} 2>&1; "
-            f"git -C {p} status -s 2>&1 | head -20; fi"
+            f"git -C {p} status -s 2>&1 | head -20; fi",
+            timeout=60,
         )
 
 
@@ -177,8 +185,10 @@ def make_source_tools(host: SourceHost, audit=None) -> list:
          "파일명 패턴으로 소스 파일을 찾는다 (find -name, 예: *.Dockerfile, values.yaml).",
          lambda path, filename: host.find_files(path, filename)),
         ("src_repo_log",
-         "저장소의 최근 이력을 조회한다 (git·svn 자동 감지, 읽기 전용). "
-         "helm 차트(SVN)의 배포 변경 이력을 클러스터 상태와 대조할 때 유용.",
+         "저장소의 최근 이력과 동기화 상태를 조회한다 (git·svn 자동 감지, 읽기 전용). "
+         "helm 차트(SVN) 분석 전에 반드시 이 도구로 작업복사본이 저장소 HEAD와 동기화됐는지 "
+         "확인하라 — 출력의 '동기화 상태'에 * 항목이 있으면 구버전이므로 답변에 "
+         "'작업복사본이 오래됨(svn update 필요)'을 명시하고 그 전제로 분석하라.",
          lambda path, limit=10: host.repo_log(path, limit)),
     ]
 
