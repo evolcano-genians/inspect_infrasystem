@@ -25,7 +25,11 @@ from .tools.k8s_read import make_tools
 
 #: 한 번의 질의(run)에서 허용하는 최대 도구 호출 수. 초과 시 강제로 wiki_writer로 빠져
 #: 그때까지의 관찰이 유실되지 않게 한다 (GraphRecursionError로 죽는 것을 방지).
-MAX_TOOL_CALLS_PER_RUN = 24
+#: 실 dev 클러스터(네임스페이스 수십 개)의 광범위 조사를 고려한 기본값이며
+#: AGENT_MAX_TOOL_CALLS 환경변수로 조정 가능하다.
+import os as _os
+
+MAX_TOOL_CALLS_PER_RUN = max(1, int(_os.environ.get("AGENT_MAX_TOOL_CALLS", "40")))
 
 
 class InspectorState(TypedDict, total=False):

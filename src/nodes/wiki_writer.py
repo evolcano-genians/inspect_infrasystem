@@ -232,10 +232,26 @@ def make_wiki_writer_node(wiki_dir: Path):
         if not final_answer:
             # 조사 한도(MAX_TOOL_CALLS_PER_RUN) 도달 등으로 최종 답이 없는 경우 —
             # 관찰을 버리지 않고 결정론적 요약으로 마무리한다.
-            count = len(state.get("observations") or [])
+            observations = state.get("observations") or []
+            problems = [
+                o for o in observations
+                if (o.get("facts") or {}).get("waiting_reasons")
+                or ((o.get("facts") or {}).get("restarts") or 0) > 0
+            ]
+            lines = [
+                f"- `{o.get('namespace','')}/{o.get('entity','')}`: {o.get('summary','')}"
+                for o in problems[:8]
+            ]
             final_answer = (
-                f"(조사 단계 한도 도달) 관찰 {count}건을 위키에 기록했습니다. "
-                "질문을 더 좁혀서 다시 시도해 주세요."
+                f"(조사 단계 한도 도달) 관찰 {len(observations)}건을 위키에 기록했습니다.\n\n"
+                + (
+                    f"한도 전까지 발견한 문제 리소스 {len(problems)}건 (상위 8건):\n"
+                    + "\n".join(lines)
+                    if problems
+                    else "한도 전까지 문제 상태의 리소스는 발견되지 않았습니다."
+                )
+                + "\n\n질문을 특정 네임스페이스/워크로드로 좁혀 다시 시도해 주세요 — "
+                "이번 관찰은 위키에 저장되어 재조사 없이 재사용됩니다."
             )
         write_observations(wiki_dir, state.get("observations") or [])
         _write_session_page(wiki_dir, state, final_answer)

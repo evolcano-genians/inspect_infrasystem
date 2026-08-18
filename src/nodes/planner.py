@@ -3,7 +3,33 @@
 from __future__ import annotations
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
+
+
+def sanitize_history(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """응답 없는 tool_call 뒤에 취소 ToolMessage를 삽입해 이력을 유효하게 만든다.
+
+    조사 한도 도달 등으로 플래너가 계획한 tool_call이 실행되지 못한 채 체크포인트에
+    남으면, OpenAI 계열 백엔드가 다음 턴에서 이력을 거부한다(모든 tool_call에는
+    응답이 따라야 함). 요청 직전에만 보정하므로 기존에 오염된 세션도 회복된다.
+    """
+    answered: set[str] = {
+        str(m.tool_call_id) for m in messages if isinstance(m, ToolMessage)
+    }
+    out: list[BaseMessage] = []
+    for msg in messages:
+        out.append(msg)
+        if isinstance(msg, AIMessage):
+            for tc in msg.tool_calls or []:
+                if str(tc.get("id")) not in answered:
+                    out.append(
+                        ToolMessage(
+                            content="[취소됨] 조사 단계 한도 도달로 실행되지 않은 호출입니다.",
+                            tool_call_id=tc.get("id") or "unknown",
+                            name=tc.get("name") or "unknown",
+                        )
+                    )
+    return out
 
 SYSTEM_PROMPT = """당신은 dev Kubernetes 클러스터를 조사(inspect)하는 읽기 전용 에이전트다.
 
@@ -33,7 +59,7 @@ def make_planner_node(model: BaseChatModel, tools: list):
             parts.append(f"[에이전트 특화 지시]\n{agent_extra}")
         parts.append(f"[위키 컨텍스트]\n{wiki_context}")
         system = SystemMessage(content="\n\n".join(parts))
-        response = bound.invoke([system, *state["messages"]])
+        response = bound.invoke([system, *sanitize_history(state["messages"])])
         # 토큰 사용량 누적 (usage_metadata를 제공하는 모델만 — fake/heuristic은 0 유지)
         usage = dict(state.get("usage") or {})
         usage["llm_calls"] = usage.get("llm_calls", 0) + 1
