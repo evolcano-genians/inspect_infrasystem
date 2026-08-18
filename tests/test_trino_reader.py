@@ -126,10 +126,52 @@ def test_tools_registered_readonly():
 
     tools = make_trino_tools(TrinoConfig(endpoint="http://trino:8080"))
     names = {t.name for t in tools}
-    assert names == {"trino_query", "trino_catalogs", "trino_schemas", "trino_tables", "trino_describe"}
+    assert names == {
+        "trino_query", "trino_catalogs", "trino_schemas", "trino_tables", "trino_describe",
+        "trino_sample", "trino_count", "trino_profile",  # nexus-lake 분석 편의 도구
+    }
     reg = verb_validator.registered_tools()
     for n in names:
         assert reg[n].verb == "sql-read"
+
+
+def test_profiling_tools_build_correct_sql():
+    """편의 도구(sample/count/profile)가 검증된 식별자로 read-only SQL을 만드는지."""
+    calls: list[str] = []
+
+    import src.tools.trino_reader as tr
+
+    class Fake:
+        def query(self, sql, max_rows=200):
+            calls.append(sql)
+            return {"columns": ["c"], "rows": [[1]], "row_count": 1, "truncated": False}
+
+    orig = tr.TrinoClient
+    tr.TrinoClient = lambda config: Fake()  # type: ignore[assignment]
+    try:
+        tools = {t.name: t for t in tr.make_trino_tools(TrinoConfig(endpoint="http://trino:8080"))}
+        tools["trino_count"].invoke({"catalog": "delta", "schema": "silver", "table": "events"})
+        tools["trino_sample"].invoke({"catalog": "delta", "schema": "silver", "table": "events", "limit": 5})
+        tools["trino_profile"].invoke({"catalog": "delta", "schema": "silver", "table": "events", "column": "user_id"})
+    finally:
+        tr.TrinoClient = orig  # type: ignore[assignment]
+
+    assert any("COUNT(*)" in c and "delta.silver.events" in c for c in calls)
+    assert any("LIMIT 5" in c for c in calls)
+    assert any("COUNT(DISTINCT user_id)" in c for c in calls)
+    # 만들어진 SQL은 전부 read-only여야 한다
+    for c in calls:
+        assert assert_readonly_sql(c)
+
+
+def test_profiling_tools_reject_injection_identifier():
+    """편의 도구도 _ident로 인젝션 식별자를 거부한다(쿼리 미실행)."""
+    import src.tools.trino_reader as tr
+
+    tr.TrinoClient = lambda config: None  # type: ignore[assignment]
+    tools = {t.name: t for t in tr.make_trino_tools(TrinoConfig(endpoint="http://trino:8080"))}
+    with pytest.raises(TrinoQueryError):
+        tools["trino_profile"].func(catalog="delta", schema="silver", table="events", column="x); DROP")
 
 
 def test_data_analyst_agent_maps_trino_tools():

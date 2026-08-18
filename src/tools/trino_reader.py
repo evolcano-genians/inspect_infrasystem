@@ -182,8 +182,32 @@ def make_trino_tools(config: TrinoConfig, audit=None) -> list:
                          result_chars=result["row_count"])
         return _fmt(result)
 
+    def _fqtn(catalog: str, schema: str, table: str) -> str:
+        """검증된 catalog.schema.table 완전수식명 — 각 식별자는 _ident로 인젝션 차단."""
+        return f"{_ident(catalog)}.{_ident(schema)}.{_ident(table)}"
+
+    def _sample(catalog, schema, table, limit=20):
+        n = max(1, min(int(limit), 100))
+        return _run("trino_sample", f"SELECT * FROM {_fqtn(catalog, schema, table)} LIMIT {n}", n)
+
+    def _count(catalog, schema, table):
+        return _run("trino_count",
+                    f"SELECT COUNT(*) AS row_count FROM {_fqtn(catalog, schema, table)}")
+
+    def _profile(catalog, schema, table, column):
+        col = _ident(column)
+        fq = _fqtn(catalog, schema, table)
+        # 단일 컬럼 프로파일: 총건수·비널·널·고유값·최소·최대 (한 번의 스캔 집계)
+        sql = (
+            f"SELECT COUNT(*) AS total, COUNT({col}) AS non_null, "
+            f"COUNT(*) - COUNT({col}) AS nulls, COUNT(DISTINCT {col}) AS distinct_vals, "
+            f"MIN({col}) AS min_v, MAX({col}) AS max_v FROM {fq}"
+        )
+        return _run("trino_profile", sql)
+
     # 도구 등록 (모두 read-only)
-    for name in ("trino_query", "trino_catalogs", "trino_schemas", "trino_tables", "trino_describe"):
+    for name in ("trino_query", "trino_catalogs", "trino_schemas", "trino_tables",
+                 "trino_describe", "trino_sample", "trino_count", "trino_profile"):
         verb_validator.register_tool(name, "sql-read", "trino")
 
     tools = [
@@ -211,6 +235,20 @@ def make_trino_tools(config: TrinoConfig, audit=None) -> list:
             func=lambda catalog, schema, table: _run(
                 "trino_describe", f"DESCRIBE {_ident(catalog)}.{_ident(schema)}.{_ident(table)}"),
             name="trino_describe", description="테이블의 컬럼 스키마를 조회한다.",
+        ),
+        StructuredTool.from_function(
+            func=_sample, name="trino_sample",
+            description="테이블에서 샘플 행을 미리 본다 (SELECT * LIMIT n, 기본 20). "
+                        "데이터 형태·값 분포를 빠르게 감 잡을 때 사용. 대량 스캔 없이 안전.",
+        ),
+        StructuredTool.from_function(
+            func=_count, name="trino_count",
+            description="테이블의 전체 행 수를 센다 (SELECT COUNT(*)). 적재량·파이프라인 상태 확인용.",
+        ),
+        StructuredTool.from_function(
+            func=_profile, name="trino_profile",
+            description="한 컬럼을 프로파일링한다: 총건수·비널·널·고유값 수·최소·최대를 한 번에. "
+                        "데이터 품질(널 비율·카디널리티)·이상치 파악에 사용. column 인자로 대상 컬럼 지정.",
         ),
     ]
     return tools

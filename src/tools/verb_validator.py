@@ -77,7 +77,7 @@ _SOURCE_FREE_RE = re.compile(r"^[^\n'\"`\\]{0,300}$")
 #   sandbox→ BashSandbox Docker 격리 + _is_sandbox_target (루프백/사설/.test만)
 #   shell  → Keycloak 로그인 후 GET-only + 호스트 화이트리스트
 # 따라서 fail-closed 대상에서 빼되, 셸/제어문자·과길이만 결정론적으로 배제한다.
-_TRINO_IDENT_ARGS = frozenset({"catalog", "schema", "table"})
+_TRINO_IDENT_ARGS = frozenset({"catalog", "schema", "table", "column"})
 _TRINO_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")  # trino_reader._IDENT_RE 와 동일
 _ENVNAME_ARGS = frozenset({"env"})              # shell_http 환경 키 (SHELL_<NAME>_*)
 _ENVNAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")

@@ -51,7 +51,11 @@ def _all_tool_names() -> set[str]:
         "SHELL_ENVS": "vm", "SHELL_VM_BASE": "https://x",
         "SHELL_VM_USER": "u", "SHELL_VM_PASSWORD": "p",
     }))
-    return {t.name for t in [*k8s_tools, *src_tools, *sec_tools, *trino_tools, *shell_tools]}
+    from src.tools.multicluster import make_multicluster_tools
+    multi_tools = make_multicluster_tools({"ctx-a": WideStub(), "ctx-b": WideStub()})
+    return {t.name for t in [
+        *k8s_tools, *src_tools, *sec_tools, *trino_tools, *shell_tools, *multi_tools,
+    ]}
 
 
 def test_every_agent_tool_mapping_points_to_real_tools():
@@ -141,6 +145,12 @@ _REPRESENTATIVE_ARGS: dict[str, dict] = {
     "trino_schemas": {"catalog": "delta"},
     "trino_tables": {"catalog": "delta", "schema": "bronze"},
     "trino_describe": {"catalog": "delta", "schema": "bronze", "table": "events"},
+    "trino_sample": {"catalog": "delta", "schema": "silver", "table": "events", "limit": 20},
+    "trino_count": {"catalog": "delta", "schema": "silver", "table": "events"},
+    "trino_profile": {"catalog": "delta", "schema": "silver", "table": "events", "column": "user_id"},
+    "k8s_list_contexts": {},
+    "k8s_compare": {"resource": "deployments", "namespace": "nexus-lake"},
+    "k8s_read_at": {"context": "aws-seoul-clouddev", "resource": "pods", "namespace": "default"},
     "shell_list_envs": {},
     "shell_http_get": {"env": "vm", "path": "/api/auth/me"},
     "sandbox_bash": {"command": "echo hi", "timeout": 30},
