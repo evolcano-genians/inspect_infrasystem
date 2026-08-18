@@ -27,11 +27,23 @@ class WideStub(StubReadOnlyClient):
 
 
 def _all_tool_names() -> set[str]:
+    from src.sandbox.bash_exec import BashSandbox
+    from src.sandbox.security_tools import make_security_tools
     from src.tools.source_reader import SourceHost, make_source_tools
+
+    class _FakeDocker:
+        @property
+        def containers(self):
+            return type("C", (), {"run": lambda *a, **k: None})()
 
     k8s_tools = make_tools(WideStub())
     src_tools = make_source_tools(SourceHost("heejoon@172.29.70.161"))
-    return {t.name for t in [*k8s_tools, *src_tools]}
+    sec_tools = make_security_tools(
+        bash_enabled=True, strix_enabled=True,
+        sandbox=BashSandbox(network="none", docker_client=_FakeDocker()),
+        runner=lambda *a, **k: None,
+    )
+    return {t.name for t in [*k8s_tools, *src_tools, *sec_tools]}
 
 
 def test_every_agent_tool_mapping_points_to_real_tools():

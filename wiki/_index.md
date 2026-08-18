@@ -224,6 +224,7 @@
 - [imagepullbackoff](patterns/imagepullbackoff.md)
 
 ## sessions
+- [2026-08-18-az-test-1](sessions/2026-08-18-az-test-1.md) 2026-08-18
 - [2026-08-18-codex-e2e-1](sessions/2026-08-18-codex-e2e-1.md) 2026-08-18
 - [2026-08-18-codex-e2e-2](sessions/2026-08-18-codex-e2e-2.md) 2026-08-18
 - [2026-08-18-demo-1](sessions/2026-08-18-demo-1.md) 2026-08-18

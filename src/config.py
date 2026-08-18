@@ -55,6 +55,8 @@ class Settings:
     kube_context: str = ""
     allow_real_cluster: bool = False
     source_ssh_host: str = ""  # user@host — 소스 read-only 조회용 (SOURCE_SSH_HOST)
+    sandbox_bash_enabled: bool = False  # 샌드박스 격리 bash (SANDBOX_BASH_ENABLED)
+    strix_enabled: bool = False  # strix pentest (STRIX_ENABLED)
 
 
 def load_settings(root: Path | None = None) -> Settings:
@@ -72,6 +74,8 @@ def load_settings(root: Path | None = None) -> Settings:
         kube_context=os.environ.get("KUBE_CONTEXT", ""),
         allow_real_cluster=_truthy(os.environ.get("AGENT_ALLOW_REAL_CLUSTER")),
         source_ssh_host=os.environ.get("SOURCE_SSH_HOST", ""),
+        sandbox_bash_enabled=_truthy(os.environ.get("SANDBOX_BASH_ENABLED")),
+        strix_enabled=_truthy(os.environ.get("STRIX_ENABLED")),
     )
 
 

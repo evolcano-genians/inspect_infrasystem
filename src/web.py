@@ -154,6 +154,18 @@ def make_app(
             extra_tools = make_source_tools(SourceHost(settings.source_ssh_host), audit)
         except SourceAccessError as exc:
             print(f"경고: 소스 열람 비활성화 — {exc}")
+    # 보안 테스트 도구 (SANDBOX_BASH_ENABLED / STRIX_ENABLED 시)
+    if settings.sandbox_bash_enabled or settings.strix_enabled:
+        from .sandbox.security_tools import make_security_tools
+
+        try:
+            extra_tools = [*extra_tools, *make_security_tools(
+                bash_enabled=settings.sandbox_bash_enabled,
+                strix_enabled=settings.strix_enabled,
+                audit=audit,
+            )]
+        except Exception as exc:
+            print(f"경고: 보안 도구 비활성화 — {type(exc).__name__}: {exc}")
 
     # 컨텍스트별 도구 세트 (클러스터 전환용). 기본 컨텍스트는 위에서 만든 k8s/tools 재사용.
     tools_by_context: dict[str, list] = {}
