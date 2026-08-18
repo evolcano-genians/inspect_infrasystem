@@ -18,4 +18,5 @@
 - [2026-08-18-codex-e2e-2](sessions/2026-08-18-codex-e2e-2.md) 2026-08-18
 - [2026-08-18-demo-1](sessions/2026-08-18-demo-1.md) 2026-08-18
 - [2026-08-18-web-codex-1](sessions/2026-08-18-web-codex-1.md) 2026-08-18
+- [2026-08-18-web-habxjwc7](sessions/2026-08-18-web-habxjwc7.md) 2026-08-18
 
