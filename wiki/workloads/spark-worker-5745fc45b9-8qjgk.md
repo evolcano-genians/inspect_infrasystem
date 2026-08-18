@@ -17,3 +17,7 @@ type: workload
 - 2026-08-18T09:21:32+00:00: phase=Running
 - 2026-08-18T09:21:32+00:00: 리소스 사용량 — spark-worker: cpu=3m mem=2350308Ki
 - 2026-08-18T22:04:05+00:00: phase=Running
+- 2026-08-18T22:07:53+00:00: phase=Running
+- 2026-08-18T22:07:53+00:00: 리소스 사용량 — spark-worker: cpu=210m mem=2266668Ki
+- 2026-08-18T22:08:07+00:00: phase=Running
+- 2026-08-18T22:08:07+00:00: 리소스 사용량 — spark-worker: cpu=210m mem=2266668Ki

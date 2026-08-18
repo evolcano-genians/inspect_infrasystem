@@ -16,3 +16,5 @@ type: workload
 - 2026-08-18T09:08:11+00:00: phase=Running
 - 2026-08-18T09:21:32+00:00: phase=Running
 - 2026-08-18T09:21:32+00:00: 리소스 사용량 — percona: cpu=3m mem=654388Ki
+- 2026-08-18T22:08:07+00:00: phase=Running
+- 2026-08-18T22:08:07+00:00: 리소스 사용량 — percona: cpu=2m mem=654356Ki

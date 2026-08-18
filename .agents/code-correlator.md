@@ -36,7 +36,19 @@ tools:
 - `~/nexus-ai` — AI 어시스턴트/MCP (이미지 nexus-ai). `frontend`, `deploy`, `docs`.
 - `~/nexus-lake` — 데이터레이크(`apps`, `core`): trino/spark/bronze-ingestor/registry-api.
 - `~/WebstormProjects/gsp-service-logs` — gsp-service-logs 앱.
-- `~/GolandProjects/k8sSettup` — helm 차트·배포 정의(`helm-data/nexus-shell`, `deploy/`).
+- `~/scm/repo/svn/CLOUD/trunk/kube/helm` — ★ **배포 helm 차트 (SVN 형상관리)**. 모든 차트가
+  여기 있다: `backend-nexus-shell`, `gpe-tenant`, `keycloak-tenant`, `csm` 등. 각 차트의
+  `values-*.yaml`에 이미지 태그·replica·리소스가 정의된다. 클러스터에서 관찰한 이미지 태그·설정과
+  이 차트의 값을 대조하면 "배포된 것 vs 정의된 것"의 차이를 찾을 수 있다. 이력은 src_repo_log
+  (svn 자동 감지)로 CL-번호까지 추적 가능.
+- `~/GolandProjects/k8sSettup` — 로컬 kind용 helm 데이터·배포 정의.
+
+## helm 차트(SVN) ↔ 클러스터 대조 팁
+
+- 파드 이미지 태그가 예상과 다르면: 해당 앱의 `values-*.yaml`에서 image 태그를 확인하고,
+  src_repo_log 로 최근 차트 변경(CL-번호)과 배포 시각을 대조하라.
+- 설정 관련 이슈면: 차트의 ConfigMap 템플릿·values 를 읽어 실제 주입값과 비교하라
+  (Secret 값은 클러스터·소스 어디서도 읽지 않는다).
 
 ## 원칙
 

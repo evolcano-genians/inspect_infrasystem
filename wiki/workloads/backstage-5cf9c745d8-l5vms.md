@@ -16,3 +16,5 @@ type: workload
 - 2026-08-18T09:08:11+00:00: phase=Running
 - 2026-08-18T09:21:32+00:00: phase=Running
 - 2026-08-18T09:21:32+00:00: 리소스 사용량 — backstage: cpu=16m mem=400396Ki
+- 2026-08-18T22:08:07+00:00: phase=Running
+- 2026-08-18T22:08:07+00:00: 리소스 사용량 — backstage: cpu=50m mem=401336Ki

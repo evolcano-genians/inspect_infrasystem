@@ -48,13 +48,19 @@ def test_commands_are_fixed_readonly_forms():
     host.read_file("~/nexus-ai/README.md", 1, 50)
     host.search("~/nexus-lake", "bronze", "*.py", 10)
     host.find_files("~/WebstormProjects/nexus-shell", "Dockerfile")
-    host.repo_log("~/nexus-ai", 5)
+    host.repo_log("~/nexus-ai", 5)  # git/svn 자동 감지 조건문
+    host.repo_log("~/scm/repo/svn/CLOUD", 3)
     # 원격에서 실행되는 건 ssh 마지막 인자(remote_cmd) — 전부 읽기 명령만
     remote_cmds = [c[-1] for c in calls]
-    assert all(c.split()[0] in ("ls", "sed", "grep", "find", "git") for c in remote_cmds)
+    assert all(c.split()[0] in ("ls", "sed", "grep", "find", "git", "if") for c in remote_cmds)
+    # repo_log(조건문)에는 git/svn 읽기 부속명령만 등장한다
+    for c in remote_cmds:
+        if c.startswith("if"):
+            assert " svn log " in c and "git -C" in c
+            assert not any(w in c for w in ("svn commit", "svn delete", "svn import", "git push"))
     # 쓰기/실행 흔적이 없어야 한다
     for c in remote_cmds:
-        assert not any(w in c for w in ("rm ", "mv ", "> ", ">>", "chmod", "curl", "wget"))
+        assert not any(w in c for w in ("rm ", "mv ", " > ", ">>", "chmod", "curl", "wget"))
 
 
 def test_injection_defenses():

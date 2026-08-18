@@ -107,9 +107,17 @@ class SourceHost:
         )
 
     def repo_log(self, path: str, limit: int = 10) -> str:
+        """git 또는 svn 저장소의 최근 이력을 조회한다 (VCS 자동 감지, 읽기 전용)."""
         p = _quote_path(path)
         n = max(1, min(int(limit), 100))
-        return self._ssh(f"git -C {p} log --oneline -n {n} 2>&1; git -C {p} status -s 2>&1 | head -20")
+        # .svn(작업복사본)이면 svn log, 아니면 git log — 둘 다 읽기 부속명령만
+        return self._ssh(
+            f"if [ -d {p}/.svn ] || svn info {p} >/dev/null 2>&1; then "
+            f"svn info {p} 2>&1 | grep -E '^URL|^Revision|Last Changed'; echo '---'; "
+            f"svn log -l {n} {p} 2>&1 | head -80; "
+            f"else git -C {p} log --oneline -n {n} 2>&1; "
+            f"git -C {p} status -s 2>&1 | head -20; fi"
+        )
 
 
 def make_source_tools(host: SourceHost, audit=None) -> list:
@@ -150,10 +158,12 @@ def make_source_tools(host: SourceHost, audit=None) -> list:
 
     specs = [
         ("src_list_dir",
-         "개발 서버(SSH)의 디렉터리를 나열한다. 주요 소스 경로: "
-         "~/WebstormProjects/nexus-shell (shell 프론트/앱), ~/nexus-ai (AI 어시스턴트/MCP), "
-         "~/nexus-lake (데이터레이크: trino/spark/bronze), ~/WebstormProjects/gsp-service-logs, "
-         "~/GolandProjects/k8sSettup (helm 차트/배포).",
+         "개발 서버(SSH)의 디렉터리를 나열한다. 주요 소스 경로:\n"
+         "- ~/WebstormProjects/nexus-shell (shell 프론트/앱, git)\n"
+         "- ~/nexus-ai (AI 어시스턴트/MCP, git), ~/nexus-lake (데이터레이크: trino/spark/bronze, git)\n"
+         "- ~/WebstormProjects/gsp-service-logs (git)\n"
+         "- ~/scm/repo/svn/CLOUD/trunk/kube/helm (★ 배포 helm 차트, SVN 형상관리 — "
+         "backend-nexus-shell, gpe-tenant, keycloak-tenant 등 모든 차트)",
          lambda path="~": host.list_dir(path)),
         ("src_read_file",
          "소스 파일의 일부를 읽는다 (start 줄부터 lines 줄, 기본 1~200). "
@@ -167,7 +177,8 @@ def make_source_tools(host: SourceHost, audit=None) -> list:
          "파일명 패턴으로 소스 파일을 찾는다 (find -name, 예: *.Dockerfile, values.yaml).",
          lambda path, filename: host.find_files(path, filename)),
         ("src_repo_log",
-         "git 저장소의 최근 커밋 이력과 작업트리 상태를 조회한다 (읽기 전용).",
+         "저장소의 최근 이력을 조회한다 (git·svn 자동 감지, 읽기 전용). "
+         "helm 차트(SVN)의 배포 변경 이력을 클러스터 상태와 대조할 때 유용.",
          lambda path, limit=10: host.repo_log(path, limit)),
     ]
 

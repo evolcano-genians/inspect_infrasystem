@@ -235,6 +235,7 @@
 - [2026-08-18-usage-live-1](sessions/2026-08-18-usage-live-1.md) 2026-08-18
 - [2026-08-18-web-23a9d9ca](sessions/2026-08-18-web-23a9d9ca.md) 2026-08-18
 - [2026-08-18-web-45f98fba](sessions/2026-08-18-web-45f98fba.md) 2026-08-18
+- [2026-08-18-web-5c38d65f](sessions/2026-08-18-web-5c38d65f.md) 2026-08-18
 - [2026-08-18-web-codex-1](sessions/2026-08-18-web-codex-1.md) 2026-08-18
 - [2026-08-18-web-d6fc9658](sessions/2026-08-18-web-d6fc9658.md) 2026-08-18
 - [2026-08-18-web-habxjwc7](sessions/2026-08-18-web-habxjwc7.md) 2026-08-18

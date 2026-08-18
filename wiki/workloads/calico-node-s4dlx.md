@@ -19,3 +19,7 @@ type: workload
 - 2026-08-18T09:04:55+00:00: 로그 조회함 (19595자, tail=80)
 - 2026-08-18T09:08:11+00:00: phase=Running, restarts=75
 - 2026-08-18T09:21:32+00:00: phase=Running, restarts=75
+- 2026-08-18T22:07:53+00:00: phase=Running, restarts=75
+- 2026-08-18T22:08:07+00:00: phase=Running, restarts=75
+- 2026-08-18T22:08:07+00:00: 리소스 사용량 — calico-node: cpu=23m mem=150324Ki
+- 2026-08-18T22:08:07+00:00: 리소스 사용량 — calico-node: cpu=23m mem=150324Ki

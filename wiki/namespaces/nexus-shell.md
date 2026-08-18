@@ -17,3 +17,4 @@ type: namespace
 - 2026-08-18T22:04:14+00:00: pods=1, unhealthy=0
 - 2026-08-18T22:04:14+00:00: pods=1, unhealthy=0
 - 2026-08-18T22:04:14+00:00: pods=1, unhealthy=0
+- 2026-08-18T22:07:53+00:00: pods=32, unhealthy=1

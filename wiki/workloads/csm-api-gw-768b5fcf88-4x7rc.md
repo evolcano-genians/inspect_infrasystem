@@ -16,3 +16,5 @@ type: workload
 - 2026-08-18T09:08:11+00:00: phase=Running, restarts=31
 - 2026-08-18T09:21:32+00:00: phase=Running, restarts=31
 - 2026-08-18T09:21:32+00:00: 리소스 사용량 — csm-api-gw: cpu=0 mem=50580Ki
+- 2026-08-18T22:08:07+00:00: phase=Running, restarts=31
+- 2026-08-18T22:08:07+00:00: 리소스 사용량 — csm-api-gw: cpu=0 mem=50580Ki

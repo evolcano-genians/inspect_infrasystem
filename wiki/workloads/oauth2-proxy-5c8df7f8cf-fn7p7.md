@@ -18,3 +18,7 @@ type: workload
 - 2026-08-18T09:21:32+00:00: 리소스 사용량 — oauth2-proxy: cpu=0 mem=6884Ki
 - 2026-08-18T22:04:05+00:00: phase=Running, restarts=39
 - 2026-08-18T22:04:14+00:00: phase=Running, restarts=39
+- 2026-08-18T22:07:53+00:00: phase=Running, restarts=39
+- 2026-08-18T22:07:53+00:00: 리소스 사용량 — oauth2-proxy: cpu=0 mem=6624Ki
+- 2026-08-18T22:08:07+00:00: phase=Running, restarts=39
+- 2026-08-18T22:08:07+00:00: 리소스 사용량 — oauth2-proxy: cpu=0 mem=6624Ki

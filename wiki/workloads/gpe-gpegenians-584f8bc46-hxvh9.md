@@ -14,3 +14,5 @@ type: workload
 ## 관찰 이력
 
 - 2026-08-18T09:08:11+00:00: phase=Running
+- 2026-08-18T22:08:07+00:00: phase=Running
+- 2026-08-18T22:08:07+00:00: 리소스 사용량 — genian-gpe-fuseki: cpu=1m mem=457176Ki, genian-gpe-opa: cpu=0 mem=102880Ki, genian-gpe-opalclient: cpu=47m mem=367752Ki, genian-gpe-opalserver: cpu=1m mem=124472Ki, genian-gpe-opaui: cpu=0 mem=179496Ki

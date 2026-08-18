@@ -24,3 +24,7 @@ type: workload
 - 2026-08-18T10:05:53+00:00: 로그 조회함 (20000자, tail=200)
 - 2026-08-18T10:05:53+00:00: 로그 조회함 (20000자, tail=200)
 - 2026-08-18T22:04:05+00:00: phase=Running, restarts=1
+- 2026-08-18T22:07:53+00:00: phase=Running, restarts=1
+- 2026-08-18T22:07:53+00:00: 리소스 사용량 — bronze-ingestor: cpu=1361m mem=2026536Ki, promote-api: cpu=1m mem=35176Ki
+- 2026-08-18T22:08:07+00:00: phase=Running, restarts=1
+- 2026-08-18T22:08:07+00:00: 리소스 사용량 — bronze-ingestor: cpu=1361m mem=2026536Ki, promote-api: cpu=1m mem=35176Ki
