@@ -18,25 +18,30 @@
     }
   }
   * { box-sizing: border-box; }
+  html, body { overflow: hidden; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
       "Noto Sans KR", "Segoe UI", sans-serif;
-    display: flex; height: 100dvh;
+    display: flex; height: 100dvh; width: 100vw;
   }
   /* ---- 세션 사이드바 ---- */
   aside {
     width: 250px; flex-shrink: 0; background: var(--side);
     border-right: 1px solid var(--line); display: flex; flex-direction: column;
+    height: 100dvh; overflow: hidden;
   }
-  aside .brand { padding: 14px 16px 8px; font-weight: 700; font-size: 15px; }
+  aside .brand { padding: 14px 16px 8px; font-weight: 700; font-size: 15px; flex-shrink: 0; }
+  /* 세션·에이전트·지식 전체가 하나의 스크롤 영역 — 뷰포트를 넘어도 사이드바 안에서만 스크롤 */
+  .side-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
   aside .newBtn {
     margin: 6px 12px 10px; padding: 8px 10px; border-radius: 10px; cursor: pointer;
     border: 1px dashed var(--muted); background: transparent; color: var(--ink);
     font: inherit; font-size: 13px; text-align: left;
   }
   aside .newBtn:hover { border-color: var(--accent); color: var(--accent); }
-  #sessions { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+  #sessions { padding: 0 8px 4px; }
+  aside .newBtn { flex-shrink: 0; }
   .sess {
     position: relative; padding: 8px 26px 8px 10px; border-radius: 10px;
     cursor: pointer; margin-bottom: 2px;
@@ -61,9 +66,11 @@
   .agentItem { padding: 7px 10px; border-radius: 10px; cursor: pointer; margin-bottom: 2px; }
   .agentItem:hover { background: var(--chip); }
   .agentItem.active { background: var(--panel); border: 1px solid var(--accent); }
-  .agentItem .t { font-size: 13px; font-weight: 600; }
+  .agentItem .t { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .agentItem.active .t { color: var(--accent); }
-  .agentItem .d { font-size: 11px; color: var(--muted); }
+  .agentItem .d { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .sess .m { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #toolsBox { margin: 4px 12px 14px; font-size: 12px; color: var(--muted); }
   #toolsBox summary { cursor: pointer; padding: 4px 0; }
   #tools { max-height: 180px; overflow-y: auto; padding: 4px 0 0 4px; }
@@ -168,17 +175,19 @@
 <aside>
   <div class="brand">🔍 inspect-k8s</div>
   <button class="newBtn" id="newSession" type="button">＋ 새 세션</button>
-  <div id="sessions"></div>
-  <div class="section-label">에이전트 · 스킬</div>
-  <div id="agents"></div>
-  <button class="newBtn" id="newAgentBtn" type="button">＋ 새 에이전트·스킬</button>
-  <div class="section-label">지식 · 진화</div>
-  <button class="newBtn" id="wikiBtn" type="button">📚 위키 보기·편집</button>
-  <button class="newBtn" id="reflectBtn" type="button">🧬 이 세션에서 배우기</button>
-  <details id="toolsBox">
-    <summary>🛠 사용 가능한 도구</summary>
-    <div id="tools"></div>
-  </details>
+  <div class="side-scroll">
+    <div id="sessions"></div>
+    <div class="section-label">에이전트 · 스킬</div>
+    <div id="agents"></div>
+    <button class="newBtn" id="newAgentBtn" type="button">＋ 새 에이전트·스킬</button>
+    <div class="section-label">지식 · 진화</div>
+    <button class="newBtn" id="wikiBtn" type="button">📚 위키 보기·편집</button>
+    <button class="newBtn" id="reflectBtn" type="button">🧬 이 세션에서 배우기</button>
+    <details id="toolsBox">
+      <summary>🛠 사용 가능한 도구</summary>
+      <div id="tools"></div>
+    </details>
+  </div>
 </aside>
 
 <div id="overlay" hidden>

@@ -162,7 +162,7 @@ def make_source_tools(host: SourceHost, audit=None) -> list:
          "- ~/WebstormProjects/nexus-shell (shell 프론트/앱, git)\n"
          "- ~/nexus-ai (AI 어시스턴트/MCP, git), ~/nexus-lake (데이터레이크: trino/spark/bronze, git)\n"
          "- ~/WebstormProjects/gsp-service-logs (git)\n"
-         "- ~/scm/repo/svn/CLOUD/trunk/kube/helm (★ 배포 helm 차트, SVN 형상관리 — "
+         "- ~/scm/repo/svn/CLOUD/branches/CURRENT/kube/helm (★ 배포 helm 차트, SVN 형상관리 — "
          "backend-nexus-shell, gpe-tenant, keycloak-tenant 등 모든 차트)",
          lambda path="~": host.list_dir(path)),
         ("src_read_file",

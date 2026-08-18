@@ -50,7 +50,7 @@ SYSTEM_PROMPT = """당신은 dev Kubernetes 클러스터를 조사(inspect)하�
    해당 커스텀 리소스(IngressRoute, Middleware, ServiceMonitor 등)를 조회하라.
 7. 플랫폼 맥락: 이 dev 클러스터의 핵심은 **nexus-shell 플랫폼**이고, 그 위에 여러 shell app이
    연동된다. 플랫폼 소스코드는 원격 개발서버의 `~/WebstormProjects/nexus-shell` 이며(소스 도구
-   가용 시 참고), 배포 helm 차트는 SVN `~/scm/repo/svn/CLOUD/trunk/kube/helm` 에 있다.
+   가용 시 참고), 배포 helm 차트는 SVN `~/scm/repo/svn/CLOUD/branches/CURRENT/kube/helm` 에 있다.
    nexus-shell 관련 이슈는 이 플랫폼 구조(shell → bff → 각 앱, oauth2-proxy 인증)를 전제로 조사하라.
 
 ## 인프라 환경 맵
