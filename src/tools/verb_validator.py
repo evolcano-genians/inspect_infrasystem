@@ -1,0 +1,144 @@
+"""결정론적 verb 검증 미들웨어 — 방어선 2.
+
+도구 실행 직전에 (도구 이름 → verb) 매핑을 화이트리스트와 대조하고 인자 형식을 검사한다.
+이 검증은 LLM의 판단이 아니라 순수 결정론적 코드다. 화이트리스트 밖이면 subprocess/API
+호출로 절대 넘어가지 않는다.
+
+방어선 1(구조적 배제)이 뚫릴 수 없는 구조이지만, 이중 확인 차원에서 유지한다 (브리프 2.1-2).
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+#: 허용 verb (브리프 2.2). 이 집합에 없는 verb는 전부 거부된다.
+ALLOWED_VERBS: frozenset[str] = frozenset(
+    {
+        "get",
+        "list",
+        "watch",
+        "describe",
+        "logs",
+        "top",
+        "explain",
+        "api-resources",
+        "version",
+        "cluster-info",
+        "ping",
+    }
+)
+
+#: 명시적 금지 verb — ALLOWED_VERBS에 없으므로 어차피 거부되지만,
+#: 거부 사유 메시지를 명확히 하기 위한 목록 (문자열 상수일 뿐, 실행 코드가 아니다).
+FORBIDDEN_VERBS: frozenset[str] = frozenset(
+    {
+        "create", "apply", "delete", "patch", "edit", "replace", "scale",
+        "rollout", "cordon", "drain", "uncordon", "exec", "cp", "port-forward",
+        "label", "annotate", "install", "upgrade", "uninstall", "set",
+    }
+)
+
+# RFC 1123 서브도메인 이름 (namespace / 리소스 이름 / 컨테이너 이름)
+_DNS_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$")
+# label/field selector에 허용하는 안전 문자 집합 (셸 메타문자·개행 등 배제 — 공백은 스페이스만)
+_SELECTOR_RE = re.compile(r"^[A-Za-z0-9_.,=!/\- ()]*$")
+
+#: 인자 이름 → 검증 방식. 여기 없는 인자는 전부 거부된다 (fail-closed).
+_NAME_ARGS = frozenset({"namespace", "name", "container"})
+_SELECTOR_ARGS = frozenset({"label_selector", "field_selector"})
+_INT_ARGS: dict[str, tuple[int, int]] = {"tail_lines": (1, 5000)}
+_BOOL_ARGS = frozenset({"previous"})
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    """등록된 read-only 도구의 명세."""
+
+    name: str
+    verb: str
+    resource: str
+
+
+@dataclass(frozen=True)
+class ValidationResult:
+    allowed: bool
+    reason: str
+    spec: ToolSpec | None = None
+
+
+# 도구 레지스트리: k8s_read.make_tools()가 도구를 만들면서 등록한다.
+# 여기 등록되지 않은 도구 이름은 무조건 거부된다.
+_REGISTRY: dict[str, ToolSpec] = {}
+
+
+def register_tool(name: str, verb: str, resource: str) -> ToolSpec:
+    """read-only 도구를 레지스트리에 등록한다. 금지 verb는 등록 자체가 불가능하다."""
+    if verb not in ALLOWED_VERBS:
+        raise ValueError(
+            f"도구 '{name}' 등록 거부: verb '{verb}' 는 허용 목록에 없습니다. "
+            f"허용: {sorted(ALLOWED_VERBS)}"
+        )
+    spec = ToolSpec(name=name, verb=verb, resource=resource)
+    _REGISTRY[name] = spec
+    return spec
+
+
+def registered_tools() -> dict[str, ToolSpec]:
+    return dict(_REGISTRY)
+
+
+def _validate_arg(key: str, value: object) -> str | None:
+    """인자 하나를 검증한다. 문제 있으면 사유 문자열, 없으면 None."""
+    if key in _NAME_ARGS:
+        if value in ("", None):
+            return None  # 선택적 이름 인자 (예: container="")
+        if not isinstance(value, str) or not _DNS_NAME_RE.match(value):
+            return f"인자 '{key}' 값 {value!r} 이 유효한 K8s 이름(RFC1123)이 아닙니다"
+        return None
+    if key in _SELECTOR_ARGS:
+        if value in ("", None):
+            return None
+        if not isinstance(value, str) or not _SELECTOR_RE.match(value) or len(value) > 512:
+            return f"인자 '{key}' 값 {value!r} 에 허용되지 않는 문자가 있습니다"
+        return None
+    if key in _INT_ARGS:
+        low, high = _INT_ARGS[key]
+        if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+            return f"인자 '{key}' 값 {value!r} 은 {low}..{high} 범위의 정수여야 합니다"
+        return None
+    if key in _BOOL_ARGS:
+        if not isinstance(value, bool):
+            return f"인자 '{key}' 값 {value!r} 은 불리언이어야 합니다"
+        return None
+    return f"알 수 없는 인자 '{key}' (fail-closed 거부)"
+
+
+def validate_tool_call(tool_name: str, args: dict | None) -> ValidationResult:
+    """도구 호출 1건을 결정론적으로 검증한다.
+
+    시간 복잡도 O(인자 수 × 인자 길이). LLM·네트워크·subprocess 미개입.
+    """
+    spec = _REGISTRY.get(tool_name)
+    if spec is None:
+        lowered = tool_name.lower()
+        hit = next((v for v in sorted(FORBIDDEN_VERBS) if v.replace("-", "_") in lowered or v in lowered), None)
+        if hit:
+            return ValidationResult(
+                False,
+                f"도구 '{tool_name}' 거부: 금지 verb '{hit}' 계열 도구는 존재하지 않으며 노출되지 않습니다",
+            )
+        return ValidationResult(False, f"도구 '{tool_name}' 거부: 등록되지 않은 도구입니다")
+
+    if spec.verb not in ALLOWED_VERBS:  # register_tool이 이미 막지만 이중 확인
+        return ValidationResult(False, f"도구 '{tool_name}' 거부: verb '{spec.verb}' 미허용", spec)
+
+    if "secret" in spec.resource.lower():
+        return ValidationResult(False, f"도구 '{tool_name}' 거부: Secret 리소스는 범위 밖입니다", spec)
+
+    for key, value in (args or {}).items():
+        problem = _validate_arg(key, value)
+        if problem:
+            return ValidationResult(False, f"도구 '{tool_name}' 거부: {problem}", spec)
+
+    return ValidationResult(True, "ok", spec)

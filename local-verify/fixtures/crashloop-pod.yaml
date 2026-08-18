@@ -1,0 +1,15 @@
+# 테스트 픽스처: CrashLoopBackOff 상태를 재현하는 파드 (샌드박스 전용 시딩)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: crashloop-demo
+  namespace: default
+  labels:
+    app: crashloop-demo
+    fixture: "true"
+spec:
+  restartPolicy: Always
+  containers:
+    - name: main
+      image: busybox:1.36
+      command: ["sh", "-c", "echo boom-marker: intentional crash for inspection fixture; sleep 2; exit 1"]

@@ -1,0 +1,45 @@
+# 테스트 픽스처: 정상 Deployment (replica 2, 롤아웃 이력 조회용)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthy-web
+  namespace: default
+  labels:
+    app: healthy-web
+    fixture: "true"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: healthy-web
+  template:
+    metadata:
+      labels:
+        app: healthy-web
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: healthy-web
+  namespace: default
+  labels:
+    fixture: "true"
+spec:
+  selector:
+    app: healthy-web
+  ports:
+    - port: 80
+      targetPort: 80

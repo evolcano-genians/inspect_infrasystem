@@ -1,0 +1,7 @@
+# k8s-inspector-sandbox — 에이전트 실증 전용 일회용 로컬 클러스터.
+# 실제 dev 클러스터와 혼동 방지를 위해 이름에 -sandbox 접미사를 강제한다 (setup-kind.sh).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker

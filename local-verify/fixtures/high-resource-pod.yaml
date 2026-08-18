@@ -1,0 +1,21 @@
+# 테스트 픽스처: 리소스 과다사용 파드 (CPU busy loop + 높은 requests/limits)
+apiVersion: v1
+kind: Pod
+metadata:
+  name: high-resource-demo
+  namespace: default
+  labels:
+    app: high-resource-demo
+    fixture: "true"
+spec:
+  containers:
+    - name: burner
+      image: busybox:1.36
+      command: ["sh", "-c", "while true; do :; done"]
+      resources:
+        requests:
+          cpu: 500m
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 512Mi
