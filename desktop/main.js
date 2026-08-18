@@ -49,16 +49,56 @@ function resolvePython() {
   return fs.existsSync(venvPy) ? venvPy : "python3";
 }
 
+// GUI로 실행하면 터미널 환경변수를 상속받지 못한다. 프로젝트 .env를 읽고,
+// 실 클러스터 read-only 조사를 위한 합리적 기본값을 채운다.
+function parseEnvFile(file) {
+  const out = {};
+  try {
+    for (const raw of fs.readFileSync(file, "utf-8").split("\n")) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#") || !line.includes("=")) continue;
+      const idx = line.indexOf("=");
+      out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+    }
+  } catch (_) {}
+  return out;
+}
+
+function buildBackendEnv() {
+  const home = app.getPath("home");
+  const fromFile = parseEnvFile(path.join(PROJECT_ROOT, ".env"));
+  const env = { ...process.env, ...fromFile }; // .env가 GUI 환경보다 우선
+  // 기본값: GUI 실행에서도 실 클러스터 read-only 조사가 바로 되게 한다.
+  const defaults = {
+    AGENT_ALLOW_REAL_CLUSTER: "1",
+    KUBECONFIG: path.join(home, ".kube", "config"),
+    KUBE_CONTEXT: "aws-seoul-clouddev",
+    MODEL_PROVIDER: "codex-oauth",
+    SOURCE_SSH_HOST: "heejoon@172.29.70.161",
+  };
+  for (const [k, v] of Object.entries(defaults)) {
+    if (!env[k]) env[k] = v;
+  }
+  // ~ 확장
+  if (env.KUBECONFIG && env.KUBECONFIG.startsWith("~")) {
+    env.KUBECONFIG = env.KUBECONFIG.replace(/^~/, home);
+  }
+  // GUI 앱은 PATH가 최소라 homebrew/docker/strix 등을 못 찾는다 — 보강한다.
+  const extraPaths = [
+    "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin",
+    path.join(home, ".strix", "bin"), path.join(home, ".local", "bin"),
+    "/Applications/Docker.app/Contents/Resources/bin",
+  ];
+  env.PATH = [...extraPaths, ...(env.PATH || "").split(":")].filter(Boolean).join(":");
+  env.WEB_HOST = HOST;
+  env.WEB_PORT = String(PORT);
+  env.PYTHONUNBUFFERED = "1";
+  return env;
+}
+
 function startServer() {
   const py = resolvePython();
-  const env = {
-    ...process.env,
-    WEB_HOST: HOST,
-    WEB_PORT: String(PORT),
-    // 기본값: 실 클러스터 read-only + codex. 사용자가 이미 설정했으면 그 값을 유지.
-    MODEL_PROVIDER: process.env.MODEL_PROVIDER || "codex-oauth",
-    PYTHONUNBUFFERED: "1",
-  };
+  const env = buildBackendEnv();
   serverProc = spawn(py, ["-m", "src.web"], { cwd: PROJECT_ROOT, env });
   serverProc.stdout.on("data", (d) => process.stdout.write(`[server] ${d}`));
   serverProc.stderr.on("data", (d) => {
