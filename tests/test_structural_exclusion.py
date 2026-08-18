@@ -97,9 +97,19 @@ def test_no_openai_api_key_anywhere():
     assert not hits, f"OPENAI_API_KEY 참조 발견: {hits}"
 
 
-def test_no_master_kubeconfig_usage():
-    """~/.kube/config 참조는 '사용 금지 검증' 목적의 두 파일에서만 허용된다."""
-    allowed = {SRC / "config.py", PROJECT_ROOT / "local-verify" / "guard-check.sh"}
+def test_master_kubeconfig_only_referenced_by_readonly_or_loopback_paths():
+    """~/.kube/config 참조는 2계층 모델상 정당한 파일에서만 허용된다.
+
+    - config.py: 실 kubeconfig 판별·가드 (read-only 조사 opt-in)
+    - guard-check.sh: 샌드박스 격리 검증
+    - clone_cli.py: 실 클러스터 read(helm get) + 루프백 kind에만 write (SandboxCluster 강제)
+    이 외의 파일이 마스터 kubeconfig를 참조하면 예기치 않은 접근이므로 실패한다.
+    """
+    allowed = {
+        SRC / "config.py",
+        SRC / "clone_cli.py",
+        PROJECT_ROOT / "local-verify" / "guard-check.sh",
+    }
     targets = list(SRC.rglob("*.py")) + list((PROJECT_ROOT / "local-verify").glob("*.sh"))
     hits = [
         str(p)
@@ -107,6 +117,18 @@ def test_no_master_kubeconfig_usage():
         if p not in allowed and ".kube/config" in p.read_text(encoding="utf-8")
     ]
     assert not hits, f"마스터 kubeconfig 경로 참조 발견: {hits}"
+
+
+def test_real_cluster_write_is_structurally_impossible():
+    """실 클러스터 쓰기 차단: 쓰기 계층(sandbox_ops)은 루프백 kubeconfig에서만 동작하고,
+    helm 쓰기 부속명령(install/upgrade/uninstall)은 허용 집합에 없다."""
+    from src.tools import sandbox_ops
+
+    assert sandbox_ops._LOOPBACK_RE.match("https://127.0.0.1:60000")
+    assert not sandbox_ops._LOOPBACK_RE.match("https://10.0.0.5:6443")
+    assert sandbox_ops._HELM_READ_SUBCOMMANDS <= {"get", "list", "status", "history"}
+    for write_sub in ("install", "upgrade", "uninstall", "rollback", "delete"):
+        assert write_sub not in sandbox_ops._HELM_READ_SUBCOMMANDS
 
 
 def test_forbidden_verbs_never_registrable():

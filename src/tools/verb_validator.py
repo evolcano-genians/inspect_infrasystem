@@ -43,9 +43,12 @@ FORBIDDEN_VERBS: frozenset[str] = frozenset(
 _DNS_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$")
 # label/field selector에 허용하는 안전 문자 집합 (셸 메타문자·개행 등 배제 — 공백은 스페이스만)
 _SELECTOR_RE = re.compile(r"^[A-Za-z0-9_.,=!/\- ()]*$")
+# CRD 좌표: group(traefik.io), version(v1alpha1), plural(ingressroutes)
+_CRD_TOKEN_RE = re.compile(r"^[a-z0-9]([-a-z0-9.]{0,63}[a-z0-9])?$")
 
 #: 인자 이름 → 검증 방식. 여기 없는 인자는 전부 거부된다 (fail-closed).
 _NAME_ARGS = frozenset({"namespace", "name", "container"})
+_CRD_ARGS = frozenset({"group", "version", "plural"})
 _SELECTOR_ARGS = frozenset({"label_selector", "field_selector"})
 _INT_ARGS: dict[str, tuple[int, int]] = {"tail_lines": (1, 5000)}
 _BOOL_ARGS = frozenset({"previous"})
@@ -95,6 +98,10 @@ def _validate_arg(key: str, value: object) -> str | None:
             return None  # 선택적 이름 인자 (예: container="")
         if not isinstance(value, str) or not _DNS_NAME_RE.match(value):
             return f"인자 '{key}' 값 {value!r} 이 유효한 K8s 이름(RFC1123)이 아닙니다"
+        return None
+    if key in _CRD_ARGS:
+        if not isinstance(value, str) or not _CRD_TOKEN_RE.match(value):
+            return f"인자 '{key}' 값 {value!r} 이 유효한 CRD 좌표(group/version/plural)가 아닙니다"
         return None
     if key in _SELECTOR_ARGS:
         if value in ("", None):

@@ -129,3 +129,43 @@ def test_prompt_injection_in_logs_cannot_trigger_mutation(wiki_dir, audit):
     assert ("get_pod_logs", "default", "crashloop-demo") in stub.calls  # 조회는 정상 수행
     assert _rejection_messages(result), "삭제 시도가 거부되지 않았습니다"
     assert all(call[0] == "get_pod_logs" for call in stub.calls), "조회 이외 호출이 발생했습니다"
+
+
+def test_new_read_tools_registered_and_readonly():
+    """확장된 read 도구(StatefulSet·Ingress·PVC·노드·CRD·범용)가 등록되고 verb가 read다."""
+    from src.tools.k8s_read import make_tools
+    from tests.conftest import StubReadOnlyClient
+
+    class WideStub(StubReadOnlyClient):
+        def __getattr__(self, name):
+            return lambda *a, **k: []
+
+    make_tools(WideStub())
+    reg = verb_validator.registered_tools()
+    for name in (
+        "k8s_list_statefulsets", "k8s_list_daemonsets", "k8s_list_jobs", "k8s_list_cronjobs",
+        "k8s_list_ingresses", "k8s_list_pvcs", "k8s_get_node", "k8s_list_crds", "k8s_list_custom",
+    ):
+        assert name in reg, f"{name} 미등록"
+        assert reg[name].verb in verb_validator.ALLOWED_VERBS
+
+
+def test_custom_resource_args_validation():
+    """범용 CRD 조회 인자(group/version/plural) 검증: 정상 통과, 인젝션성 거부."""
+    from src.tools.k8s_read import make_tools
+    from tests.conftest import StubReadOnlyClient
+
+    class WideStub(StubReadOnlyClient):
+        def __getattr__(self, name):
+            return lambda *a, **k: []
+
+    make_tools(WideStub())
+    ok = verb_validator.validate_tool_call(
+        "k8s_list_custom",
+        {"group": "traefik.io", "version": "v1alpha1", "plural": "ingressroutes", "namespace": "demo"},
+    )
+    assert ok.allowed
+    bad = verb_validator.validate_tool_call(
+        "k8s_list_custom", {"group": "traefik.io; rm -rf /", "version": "v1", "plural": "x"}
+    )
+    assert not bad.allowed

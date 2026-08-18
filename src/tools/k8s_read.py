@@ -16,11 +16,14 @@ from typing import Callable
 
 from kubernetes import config as k8s_loader
 from kubernetes.client import (
+    ApiextensionsV1Api,
     ApiException,
     AppsV1Api,
+    BatchV1Api,
     Configuration,
     CoreV1Api,
     CustomObjectsApi,
+    NetworkingV1Api,
     VersionApi,
 )
 from langchain_core.tools import StructuredTool
@@ -37,6 +40,8 @@ class ReadOnlyK8sClient:
     """읽기 전용 K8s facade. 모든 요청은 GuardedApiClient(GET-only)를 통과한다."""
 
     def __init__(self, kubeconfig_path: str, context: str | None = None):
+        self._kubeconfig_path = kubeconfig_path
+        self._context = context or None
         cfg = Configuration()
         k8s_loader.load_kube_config(
             config_file=kubeconfig_path,
@@ -46,6 +51,8 @@ class ReadOnlyK8sClient:
         self._api = GuardedApiClient(configuration=cfg)
         core = CoreV1Api(self._api)
         apps = AppsV1Api(self._api)
+        batch = BatchV1Api(self._api)
+        networking = NetworkingV1Api(self._api)
         # read 계열 메서드만 명시적으로 바인딩한다. core/apps 객체 자체는 보관하지 않는다.
         self._list_namespace = core.list_namespace
         self._list_namespaced_pod = core.list_namespaced_pod
@@ -61,7 +68,15 @@ class ReadOnlyK8sClient:
         self._list_namespaced_deployment = apps.list_namespaced_deployment
         self._read_namespaced_deployment = apps.read_namespaced_deployment
         self._list_namespaced_replica_set = apps.list_namespaced_replica_set
+        self._list_namespaced_stateful_set = apps.list_namespaced_stateful_set
+        self._list_namespaced_daemon_set = apps.list_namespaced_daemon_set
         self._apps_api_resources = apps.get_api_resources
+        self._list_namespaced_cron_job = batch.list_namespaced_cron_job
+        self._list_namespaced_job = batch.list_namespaced_job
+        self._list_namespaced_pvc = core.list_namespaced_persistent_volume_claim
+        self._list_namespaced_ingress = networking.list_namespaced_ingress
+        self._read_node = core.read_node
+        self._list_crd = ApiextensionsV1Api(self._api).list_custom_resource_definition
         self._version = VersionApi(self._api).get_code
         custom = CustomObjectsApi(self._api)
         self._list_namespaced_custom = custom.list_namespaced_custom_object
@@ -177,6 +192,128 @@ class ReadOnlyK8sClient:
                 raise
             view["endpoints"] = []
         return view
+
+    def list_statefulsets(self, namespace: str) -> list[dict]:
+        return [_workload_view(w, "StatefulSet") for w in self._list_namespaced_stateful_set(namespace).items]
+
+    def list_daemonsets(self, namespace: str) -> list[dict]:
+        out = []
+        for d in self._list_namespaced_daemon_set(namespace).items:
+            out.append({
+                "name": d.metadata.name, "namespace": d.metadata.namespace, "kind": "DaemonSet",
+                "desired": d.status.desired_number_scheduled, "ready": d.status.number_ready,
+                "available": d.status.number_available or 0,
+                "images": [c.image for c in d.spec.template.spec.containers],
+            })
+        return out
+
+    def list_jobs(self, namespace: str) -> list[dict]:
+        out = []
+        for j in self._list_namespaced_job(namespace).items:
+            out.append({
+                "name": j.metadata.name, "namespace": j.metadata.namespace, "kind": "Job",
+                "active": j.status.active or 0, "succeeded": j.status.succeeded or 0,
+                "failed": j.status.failed or 0,
+                "images": [c.image for c in j.spec.template.spec.containers],
+            })
+        return out
+
+    def list_cronjobs(self, namespace: str) -> list[dict]:
+        out = []
+        for c in self._list_namespaced_cron_job(namespace).items:
+            out.append({
+                "name": c.metadata.name, "namespace": c.metadata.namespace, "kind": "CronJob",
+                "schedule": c.spec.schedule, "suspend": c.spec.suspend,
+                "last_schedule": _ts(c.status.last_schedule_time),
+                "active": len(c.status.active or []),
+            })
+        return out
+
+    def list_ingresses(self, namespace: str) -> list[dict]:
+        out = []
+        for ing in self._list_namespaced_ingress(namespace).items:
+            rules = []
+            for r in ing.spec.rules or []:
+                for p in (r.http.paths if r.http else []) or []:
+                    svc = p.backend.service
+                    rules.append({
+                        "host": r.host, "path": p.path,
+                        "service": f"{svc.name}:{svc.port.number or svc.port.name}" if svc else None,
+                    })
+            out.append({
+                "name": ing.metadata.name, "namespace": ing.metadata.namespace,
+                "ingress_class": ing.spec.ingress_class_name, "rules": rules,
+            })
+        return out
+
+    def list_pvcs(self, namespace: str) -> list[dict]:
+        out = []
+        for pvc in self._list_namespaced_pvc(namespace).items:
+            out.append({
+                "name": pvc.metadata.name, "namespace": pvc.metadata.namespace,
+                "phase": pvc.status.phase, "storage_class": pvc.spec.storage_class_name,
+                "access_modes": pvc.spec.access_modes,
+                "capacity": (pvc.status.capacity or {}).get("storage"),
+                "volume": pvc.spec.volume_name,
+            })
+        return out
+
+    def get_node(self, name: str) -> dict:
+        """노드 1개의 상세 (master/control-plane 조사 포함) — 조건·용량·시스템 정보."""
+        n = self._read_node(name)
+        info = n.status.node_info
+        return {
+            "name": n.metadata.name,
+            "roles": [k.rsplit("/", 1)[-1] for k in (n.metadata.labels or {})
+                      if k.startswith("node-role.kubernetes.io/")],
+            "labels": n.metadata.labels or {},
+            "taints": [{"key": t.key, "effect": t.effect, "value": t.value}
+                       for t in (n.spec.taints or [])],
+            "unschedulable": bool(n.spec.unschedulable),
+            "conditions": [{"type": c.type, "status": c.status, "reason": c.reason}
+                           for c in (n.status.conditions or [])],
+            "capacity": dict(n.status.capacity or {}),
+            "allocatable": dict(n.status.allocatable or {}),
+            "system": {
+                "os_image": info.os_image, "kernel": info.kernel_version,
+                "container_runtime": info.container_runtime_version,
+                "kubelet": info.kubelet_version, "architecture": info.architecture,
+            },
+            "addresses": [{"type": a.type, "address": a.address} for a in (n.status.addresses or [])],
+        }
+
+    def list_crds(self) -> list[dict]:
+        """클러스터에 설치된 CRD 목록 (group/version/plural — 범용 조회의 좌표)."""
+        out = []
+        for c in self._list_crd().items:
+            versions = [v.name for v in (c.spec.versions or [])]
+            out.append({
+                "name": c.metadata.name, "group": c.spec.group,
+                "kind": c.spec.names.kind, "plural": c.spec.names.plural,
+                "scope": c.spec.scope, "versions": versions,
+            })
+        return sorted(out, key=lambda x: x["name"])
+
+    def list_custom(self, group: str, version: str, plural: str, namespace: str = "") -> list[dict]:
+        """범용 CRD 조회 (예: traefik.io/v1alpha1/ingressroutes). 네임스페이스 생략 시 전체.
+
+        커스텀 리소스는 임의 스펙을 담으므로, 값 유출 방지를 위해 spec 은 최상위 키 목록만
+        노출하고 metadata(name/namespace/labels)와 status 요약만 반환한다.
+        """
+        if namespace:
+            body = self._list_namespaced_custom(group, version, namespace, plural)
+        else:
+            body = self._list_cluster_custom(group, version, plural)
+        out = []
+        for item in body.get("items", []):
+            meta = item.get("metadata", {})
+            out.append({
+                "name": meta.get("name"), "namespace": meta.get("namespace"),
+                "labels": meta.get("labels") or {},
+                "spec_keys": sorted((item.get("spec") or {}).keys()),
+                "status_summary": _status_summary(item.get("status")),
+            })
+        return out
 
     def list_configmaps(self, namespace: str) -> list[dict]:
         """ConfigMap은 메타데이터와 data 키 이름만 반환한다 — 값은 절대 노출하지 않는다."""
@@ -303,6 +440,40 @@ def _pod_view(pod) -> dict:
         "labels": pod.metadata.labels or {},
         "containers": containers,
     }
+
+
+def _workload_view(w, kind: str) -> dict:
+    """StatefulSet 등 replica 기반 워크로드 공용 뷰."""
+    status = w.status
+    return {
+        "name": w.metadata.name,
+        "namespace": w.metadata.namespace,
+        "kind": kind,
+        "replicas": {
+            "desired": w.spec.replicas,
+            "ready": getattr(status, "ready_replicas", 0) or 0,
+            "current": getattr(status, "current_replicas", getattr(status, "replicas", 0)) or 0,
+            "updated": getattr(status, "updated_replicas", 0) or 0,
+        },
+        "images": [c.image for c in w.spec.template.spec.containers],
+        "service_name": getattr(w.spec, "service_name", None),
+    }
+
+
+def _status_summary(status) -> dict:
+    """커스텀 리소스 status에서 값 유출 없이 요약만 뽑는다 (조건·phase·키 목록)."""
+    if not isinstance(status, dict):
+        return {}
+    summary: dict = {"keys": sorted(status.keys())}
+    if "phase" in status:
+        summary["phase"] = status["phase"]
+    conditions = status.get("conditions")
+    if isinstance(conditions, list):
+        summary["conditions"] = [
+            {"type": c.get("type"), "status": c.get("status"), "reason": c.get("reason")}
+            for c in conditions if isinstance(c, dict)
+        ][:8]
+    return summary
 
 
 def _deployment_view(d) -> dict:
@@ -450,9 +621,60 @@ def make_tools(k8s, audit: AuditLogger | None = None) -> list[StructuredTool]:
             lambda namespace: k8s.list_configmaps(namespace),
         ),
         (
+            "k8s_list_statefulsets", "list", "statefulsets",
+            "네임스페이스의 StatefulSet 목록과 replica 상태를 조회한다.",
+            lambda namespace: k8s.list_statefulsets(namespace),
+        ),
+        (
+            "k8s_list_daemonsets", "list", "daemonsets",
+            "네임스페이스의 DaemonSet 목록과 상태를 조회한다.",
+            lambda namespace: k8s.list_daemonsets(namespace),
+        ),
+        (
+            "k8s_list_jobs", "list", "jobs",
+            "네임스페이스의 Job 목록과 완료/실패 상태를 조회한다.",
+            lambda namespace: k8s.list_jobs(namespace),
+        ),
+        (
+            "k8s_list_cronjobs", "list", "cronjobs",
+            "네임스페이스의 CronJob 목록(스케줄·마지막 실행)을 조회한다.",
+            lambda namespace: k8s.list_cronjobs(namespace),
+        ),
+        (
+            "k8s_list_ingresses", "list", "ingresses",
+            "네임스페이스의 Ingress(호스트·경로·백엔드 서비스)를 조회한다.",
+            lambda namespace: k8s.list_ingresses(namespace),
+        ),
+        (
+            "k8s_list_pvcs", "list", "persistentvolumeclaims",
+            "네임스페이스의 PVC(상태·스토리지클래스·용량)를 조회한다.",
+            lambda namespace: k8s.list_pvcs(namespace),
+        ),
+        (
             "k8s_list_nodes", "list", "nodes",
             "클러스터 노드 목록과 상태를 조회한다.",
             lambda: k8s.list_nodes(),
+        ),
+        (
+            "k8s_get_node", "get", "nodes",
+            "노드 1개의 상세(역할·taint·조건·용량·시스템 정보)를 조회한다. "
+            "master/control-plane 노드 조사에 사용.",
+            lambda name: k8s.get_node(name),
+        ),
+        (
+            "k8s_list_crds", "list", "customresourcedefinitions",
+            "클러스터에 설치된 CRD 목록(group/version/plural)을 조회한다. "
+            "이 좌표로 k8s_list_custom 을 호출해 커스텀 리소스를 볼 수 있다.",
+            lambda: k8s.list_crds(),
+        ),
+        (
+            "k8s_list_custom", "list", "customresources",
+            "범용 커스텀 리소스(CRD) 조회. group/version/plural 지정 "
+            "(예: traefik.io/v1alpha1/ingressroutes). namespace 생략 시 전체. "
+            "값 유출 방지를 위해 spec 은 키 목록만, status 는 요약만 반환한다.",
+            lambda group, version, plural, namespace="": k8s.list_custom(
+                group, version, plural, namespace
+            ),
         ),
         (
             "k8s_top_pods", "top", "pods.metrics.k8s.io",
