@@ -14,3 +14,5 @@ type: workload
 ## 관찰 이력
 
 - 2026-08-18T09:08:11+00:00: phase=Running
+- 2026-08-18T09:21:32+00:00: phase=Running
+- 2026-08-18T09:21:32+00:00: 리소스 사용량 — loki: cpu=8m mem=124688Ki

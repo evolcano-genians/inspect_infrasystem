@@ -14,3 +14,5 @@ type: workload
 ## 관찰 이력
 
 - 2026-08-18T09:08:11+00:00: phase=Running, restarts=1
+- 2026-08-18T09:21:32+00:00: phase=Running, restarts=1
+- 2026-08-18T09:21:32+00:00: 리소스 사용량 — bronze-ingestor: cpu=710m mem=2003020Ki, promote-api: cpu=1m mem=34896Ki

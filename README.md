@@ -204,7 +204,39 @@ AGENT_ALLOW_REAL_CLUSTER=1 KUBECONFIG=~/.kube/config KUBE_CONTEXT=aws-seoul-clou
 - 웹 헤더에 현재 대상(🌐 실 / 🧪 샌드박스 + 컨텍스트)이 표시된다.
 
 > 이 저장소의 read-only 에이전트는 실 클러스터를 **읽기만** 한다. 복제본을 kind에 만드는
-> 쓰기 작업은 별도 도구(operational script)의 몫이며, 이 에이전트의 실행 경로에 포함되지 않는다.
+> 쓰기 작업은 별도 계층(`src/tools/sandbox_ops.py`)이 담당하며, 아래 구조적 격리로 실
+> 클러스터에는 절대 쓸 수 없다.
+
+### dev → kind 복제 (Helm 기반, `src/clone_cli.py`)
+
+실 dev 클러스터를 read-only로 분석해 로컬 kind에 복제한다. 원칙: **실 클러스터엔 helm 읽기
+부속명령만, 쓰기는 루프백 kind로만.**
+
+```bash
+# 정제 계획만 (실 클러스터 read만, 쓰기 없음)
+KUBE_CONTEXT=aws-seoul-clouddev .venv/bin/python -m src.clone_cli \
+    --release adminer-shj-test --namespace nexus-shell --plan
+
+# kind 샌드박스에 실제 복제
+KUBE_CONTEXT=aws-seoul-clouddev .venv/bin/python -m src.clone_cli \
+    --release adminer-shj-test --namespace nexus-shell \
+    --target-namespace clone-adminer --load-images
+```
+
+**구조적 안전장치** (`SandboxCluster`): kubeconfig의 서버가 `127.0.0.1`이고 컨텍스트가
+`kind-*`일 때만 객체가 생성된다 — 실 클러스터를 가리키는 설정으로는 쓰기 핸들 생성 자체가
+불가능하다(`SandboxSafetyError`). `CloneService`는 helm의 `install/upgrade/uninstall`을
+거부하고 `get/list/status`만 허용하며, prod 컨텍스트를 원본으로 쓸 수 없다.
+
+**정제(sanitize) 규칙** (`manifest_sanitizer.py`): `helm get manifest`(clean 렌더링)를 받아
+LoadBalancer→ClusterIP, storageClassName→standard, replicas→1, AWS 어노테이션·nodeSelector·
+tolerations·imagePullSecrets 제거, RBAC·Secret·미지원 CRD 제외. **Secret은 읽지 않고**
+매니페스트의 참조(secretKeyRef/volume items)만으로 더미 스텁을 합성한다.
+
+- 실측: `adminer-shj-test`(nexus-shell)를 실 클러스터에서 read → 정제(Calico/Traefik CRD 4개
+  제외, `nexus-shell-bff-secret` 더미 스텁) → kind에 배포해 **파드 Running 1/1** 확인.
+- 사설 이미지(genians ECR)·arm64 미지원·DB DROP init 컨테이너가 있는 릴리스는 추가 준비가
+  필요하다 (README의 복제 주의사항 참고).
 
 ## 5. 마스터 크리덴셜 격리와 로컬 실증
 
@@ -330,6 +362,7 @@ KUBECONFIG=.local/kind-kubeconfig.yaml MODEL_PROVIDER=codex-oauth \
 | 12 | 에이전트 카탈로그·세션 관리 — .agents 로딩, 프롬프트 주입, 세션별 context 격리/복원/삭제, 추론 단계 정책 | `test_agents.py` | ✗ |
 | 13 | 편집 API — 위키 편집 시 레다크션 강제·경로 조작 차단, 에이전트 편집/생성·리로드 | `test_editor_api.py` | ✗ |
 | 14 | 자가 진화 — 신호 감지·교훈 축적(레다크션)·프롬프트 주입·제안 승인 게이트 | `test_evolution.py` | ✗ |
+| 15 | dev→kind 복제 — 매니페스트 정제, 루프백 강제, helm 읽기 전용, Secret 스텁 | `test_clone.py` | ✗ |
 
 클러스터 필요 테스트는 `KUBECONFIG` 미설정 시 skip 처리되지만, **공식 검증 절차(§6)는 반드시
 샌드박스를 대상으로 전체 실행**한다.
