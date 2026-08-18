@@ -26,9 +26,13 @@ def make_planner_node(model: BaseChatModel, tools: list):
 
     def planner(state: dict) -> dict:
         wiki_context = state.get("wiki_context") or "(관련 위키 페이지 없음)"
-        system = SystemMessage(
-            content=f"{SYSTEM_PROMPT}\n\n[위키 컨텍스트]\n{wiki_context}"
-        )
+        # 에이전트 정의(.agents/*.md)의 추가 지시 — 프롬프트만 바꿀 뿐 도구·권한은 불변
+        agent_extra = (state.get("agent_instructions") or "").strip()
+        parts = [SYSTEM_PROMPT]
+        if agent_extra:
+            parts.append(f"[에이전트 특화 지시]\n{agent_extra}")
+        parts.append(f"[위키 컨텍스트]\n{wiki_context}")
+        system = SystemMessage(content="\n\n".join(parts))
         response = bound.invoke([system, *state["messages"]])
         return {"messages": [response]}
 

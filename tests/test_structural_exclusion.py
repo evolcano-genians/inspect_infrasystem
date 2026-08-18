@@ -17,6 +17,11 @@ SRC = PROJECT_ROOT / "src"
 
 FORBIDDEN_PREFIXES = ("create_", "delete_", "patch_", "replace_", "connect_")
 
+#: K8s가 아닌 로컬 저장소 API에 한해 문서화된 예외.
+#: - delete_thread: LangGraph SqliteSaver의 로컬 체크포인트(대화 이력) 삭제 —
+#:   클러스터로 나가는 호출이 아니다. 단, K8s 레이어(src/tools/)에서는 예외 없이 금지된다.
+ALLOWED_LOCAL_SYMBOLS = frozenset({"delete_thread"})
+
 
 def _iter_src_files():
     return sorted(SRC.rglob("*.py"))
@@ -38,10 +43,14 @@ def _identifiers(tree: ast.AST):
 def test_no_mutating_symbols_anywhere_in_src():
     violations = []
     for path in _iter_src_files():
+        in_k8s_layer = "tools" in path.relative_to(SRC).parts
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for ident in _identifiers(tree):
-            if any(ident.startswith(p) for p in FORBIDDEN_PREFIXES):
-                violations.append(f"{path.relative_to(PROJECT_ROOT)}: {ident}")
+            if not any(ident.startswith(p) for p in FORBIDDEN_PREFIXES):
+                continue
+            if ident in ALLOWED_LOCAL_SYMBOLS and not in_k8s_layer:
+                continue  # 로컬 저장소 API (위 문서화된 예외)
+            violations.append(f"{path.relative_to(PROJECT_ROOT)}: {ident}")
     assert not violations, f"mutating 심볼이 참조되었습니다: {violations}"
 
 

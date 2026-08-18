@@ -40,6 +40,7 @@ class InspectorState(TypedDict, total=False):
     observations: list
     tool_trace: list
     final_answer: str
+    agent_instructions: str  # 선택된 에이전트 정의(.agents/*.md)의 추가 시스템 지시
 
 
 def make_executor_node(tools: list, audit: AuditLogger | None):
@@ -133,8 +134,9 @@ def build_graph(
     audit: AuditLogger | None = None,
     checkpointer=None,
     interrupt_before: list[str] | None = None,
+    tools: list | None = None,
 ):
-    tools = make_tools(k8s, audit)
+    tools = tools if tools is not None else make_tools(k8s, audit)
     graph = StateGraph(InspectorState)
     graph.add_node("wiki_reader", make_wiki_reader_node(wiki_dir))
     graph.add_node("planner", make_planner_node(model, tools))

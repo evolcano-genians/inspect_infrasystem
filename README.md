@@ -233,8 +233,18 @@ KUBECONFIG=.local/kind-kubeconfig.yaml MODEL_PROVIDER=codex-oauth \
   질문 길이 상한, thread_id 형식 검증, 그래프 호출 전역 직렬화.
 - **스트리밍**: 도구 호출/거부/오류/최종 답변이 SSE로 실시간 표시된다 — 거부된 호출도
   UI에 그대로 드러나 read-only 정책 동작을 눈으로 확인할 수 있다.
+- **세션별 작업 관리**: 사이드바에서 세션을 만들고 전환·삭제할 수 있다. 각 세션의 대화
+  context는 thread별 SqliteSaver 체크포인트에 유지되어 전환 시 이력이 복원되고
+  (`GET /api/sessions/{id}/history`), 세션 삭제 시 체크포인트까지 함께 지워진다.
+  세션 메타(제목=첫 질문, 최근 활동, 턴 수, 에이전트)는 `.checkpoints/sessions.sqlite`에 저장.
+- **에이전트 카탈로그 (`.agents/*.md`)**: Claude Code의 `.claude/agents` 패턴 —
+  frontmatter(name/description) + 본문(플래너 추가 지시)로 에이전트를 정의하면 사이드바에서
+  보고 선택할 수 있다. 기본 제공: `inspector`(builtin), `sre-triage`(장애 분류),
+  `capacity-analyst`(용량 분석). **보안 불변식**: 에이전트 정의는 프롬프트만 바꾼다 —
+  도구 목록·verb 화이트리스트·전송 가드는 어떤 에이전트를 선택해도 동일하다.
+  사이드바의 "사용 가능한 도구" 패널이 16개 read-only 도구 전체를 노출한다.
 - **대화 연속성**: 같은 세션(thread)은 SqliteSaver 체크포인트로 이어지고, "새 세션"을 눌러도
-  위키 장기 기억은 유지된다.
+  위키 장기 기억은 유지된다 (context는 세션별, 위키는 전 세션 공유).
 - 프로바이더: `codex-oauth`(실사용) / `heuristic`(로그인 없는 오프라인 데모) / `fake`(테스트).
 
 `.env.example` → `.env` 복사 후 `KUBECONFIG` 경로와 `MODEL_PROVIDER`(기본 `codex-oauth`,
@@ -257,6 +267,7 @@ KUBECONFIG=.local/kind-kubeconfig.yaml MODEL_PROVIDER=codex-oauth \
 | 9 | 세션 간 위키 재사용 — 두 번째 세션이 재조사 없이 첫 세션의 관찰을 반영 | `test_wiki_reuse_across_sessions.py` | ✗ |
 | 10 | 강건성 회귀 (적대적 리뷰 확정 결함) — 인자 누락·도구 예외·전송가드 위반의 우아한 처리, 조사 한도, thread 재사용 중복 방지 | `test_robustness.py` | ✗ |
 | 11 | 웹 하네스 — SSE 스트림, 웹 경유 우회 시도 거부, 입력 검증, 마스터 kubeconfig fail-fast | `test_web_harness.py` | ✗ |
+| 12 | 에이전트 카탈로그·세션 관리 — .agents 로딩, 프롬프트 주입, 세션별 context 격리/복원/삭제 | `test_agents.py` | ✗ |
 
 클러스터 필요 테스트는 `KUBECONFIG` 미설정 시 skip 처리되지만, **공식 검증 절차(§6)는 반드시
 샌드박스를 대상으로 전체 실행**한다.
@@ -273,13 +284,18 @@ inspect-k8s/
 ├── README.md
 ├── pyproject.toml
 ├── .env.example                 # KUBECONFIG, MODEL_PROVIDER (API 키 항목 없음)
+├── .agents/                     # 에이전트 정의 (Claude Code .claude/agents 패턴)
+│   ├── sre-triage.md
+│   └── capacity-analyst.md
 ├── scripts/
 │   └── bootstrap-codex-auth.py  # codex CLI 세션 → 어댑터 자격증명 이식
 ├── src/
 │   ├── graph.py                 # LangGraph StateGraph 조립 + checkpointer
 │   ├── cli.py                   # 자연어 질의 진입점 (CLI)
-│   ├── web.py                   # 웹 대화 하네스 (FastAPI + SSE)
-│   ├── static/chat.html         # 브라우저 채팅 UI
+│   ├── web.py                   # 웹 대화 하네스 (FastAPI + SSE, 세션·에이전트 API)
+│   ├── sessions.py              # 세션 레지스트리 (제목·활동·에이전트 메타)
+│   ├── agents.py                # .agents/*.md 로더
+│   ├── static/chat.html         # 브라우저 채팅 UI (세션 사이드바 + 에이전트 패널)
 │   ├── config.py                # 컨텍스트 이름 가드, env 로딩
 │   ├── audit.py                 # append-only JSONL audit 로거
 │   ├── llm.py                   # Codex(호환 보정) / heuristic / scripted 모델 팩토리

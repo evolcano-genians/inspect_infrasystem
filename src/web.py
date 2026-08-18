@@ -25,14 +25,18 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.errors import GraphRecursionError
 from pydantic import BaseModel, Field
 
+from .agents import load_agents
 from .audit import AuditLogger
 from .config import Settings, assert_safe_kubeconfig, load_settings
 from .graph import build_graph
 from .llm import make_model
+from .sessions import SessionStore
+from .tools import verb_validator
+from .tools.k8s_read import make_tools
 
 _STATIC = Path(__file__).resolve().parent / "static"
 _THREAD_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
@@ -42,6 +46,7 @@ MAX_QUESTION_CHARS = 2_000
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
     thread_id: str = Field(default="", max_length=64)
+    agent: str = Field(default="", max_length=64)
 
 
 def _sse(payload: dict) -> str:
@@ -82,9 +87,23 @@ def make_app(
             sqlite3.connect(str(settings.checkpoint_db), check_same_thread=False)
         )
 
+    tools = make_tools(k8s, audit)
     graph = build_graph(
-        model=model, k8s=k8s, wiki_dir=settings.wiki_dir, audit=audit, checkpointer=checkpointer
+        model=model, k8s=k8s, wiki_dir=settings.wiki_dir, audit=audit,
+        checkpointer=checkpointer, tools=tools,
     )
+    sessions = SessionStore(settings.checkpoint_db.parent / "sessions.sqlite")
+    agents = load_agents(settings.agents_dir)
+    tool_specs = verb_validator.registered_tools()
+    tool_listing = [
+        {
+            "name": t.name,
+            "description": t.description,
+            "verb": tool_specs[t.name].verb if t.name in tool_specs else "",
+            "resource": tool_specs[t.name].resource if t.name in tool_specs else "",
+        }
+        for t in tools
+    ]
     # 그래프 호출은 전역 락으로 직렬화한다 — 단일 사용자 로컬 도구이며,
     # 같은 thread_id 동시 호출과 sqlite 경합을 코드 레벨에서 차단한다.
     invoke_lock = threading.Lock()
@@ -101,9 +120,69 @@ def make_app(
             {
                 "ok": True,
                 "model_provider": settings.model_provider,
+                "model": settings.codex_model if settings.model_provider == "codex-oauth"
+                else settings.model_provider,
                 "kubeconfig": bool(settings.kubeconfig),
             }
         )
+
+    # ---------- 에이전트/도구 카탈로그 (Claude Code의 .claude/agents 패턴) ----------
+    # 에이전트는 플래너 프롬프트만 바꾼다 — 도구·verb 화이트리스트·전송 가드는 전 에이전트 동일.
+
+    @app.get("/api/agents")
+    def list_agents_api() -> JSONResponse:
+        return JSONResponse(
+            {
+                "agents": [a.to_dict() for a in agents.values()],
+                "default": "inspector",
+                "tools": tool_listing,
+            }
+        )
+
+    @app.get("/api/agents/{name}")
+    def agent_detail(name: str) -> JSONResponse:
+        agent = agents.get(name)
+        if agent is None:
+            return JSONResponse({"error": f"에이전트 '{name}' 없음"}, status_code=404)
+        return JSONResponse(agent.to_dict(include_instructions=True))
+
+    # ---------- 세션별 작업 관리 ----------
+    # 대화 context는 thread_id별 checkpointer가 보존한다. 아래 API는 그 위의
+    # 메타데이터(목록·제목·이력 복원)만 다룬다.
+
+    @app.get("/api/sessions")
+    def list_sessions() -> JSONResponse:
+        return JSONResponse({"sessions": [s.to_dict() for s in sessions.list()]})
+
+    @app.post("/api/sessions")
+    def new_session() -> JSONResponse:
+        return JSONResponse({"thread_id": "web-" + uuid.uuid4().hex[:8]})
+
+    @app.get("/api/sessions/{thread_id}/history")
+    def session_history(thread_id: str) -> JSONResponse:
+        if not _THREAD_ID_RE.match(thread_id):
+            return JSONResponse({"error": "thread_id 형식이 올바르지 않습니다"}, status_code=400)
+        state = graph.get_state({"configurable": {"thread_id": thread_id}})
+        turns: list[dict] = []
+        for msg in (state.values or {}).get("messages") or []:
+            if isinstance(msg, HumanMessage):
+                turns.append({"role": "user", "content": str(msg.content)})
+            elif isinstance(msg, AIMessage) and not msg.tool_calls and str(msg.content).strip():
+                turns.append({"role": "assistant", "content": str(msg.content)})
+        meta = sessions.get(thread_id)
+        return JSONResponse(
+            {"thread_id": thread_id, "turns": turns, "meta": meta.to_dict() if meta else None}
+        )
+
+    @app.delete("/api/sessions/{thread_id}")
+    def remove_session(thread_id: str) -> JSONResponse:
+        if not _THREAD_ID_RE.match(thread_id):
+            return JSONResponse({"error": "thread_id 형식이 올바르지 않습니다"}, status_code=400)
+        removed = sessions.remove(thread_id)
+        if hasattr(checkpointer, "delete_thread"):  # 체크포인트(대화 context)도 함께 삭제
+            with invoke_lock:
+                checkpointer.delete_thread(thread_id)
+        return JSONResponse({"removed": removed})
 
     @app.post("/api/chat")
     def chat(req: ChatRequest) -> StreamingResponse:
@@ -114,12 +193,20 @@ def make_app(
                 media_type="text/event-stream",
             )
         question = req.message.strip()
+        agent = agents.get(req.agent or "inspector")
+        if agent is None:
+            return StreamingResponse(
+                iter([_sse({"type": "error", "message": f"에이전트 '{req.agent}' 없음"})]),
+                media_type="text/event-stream",
+            )
+        sessions.touch(thread, title_candidate=question, agent=agent.name)
 
         def stream():
             payload = {
                 "question": question,
                 "session_id": thread,
                 "messages": [HumanMessage(question)],
+                "agent_instructions": agent.instructions,
             }
             config = {"configurable": {"thread_id": thread}, "recursion_limit": 60}
             yield _sse({"type": "start", "thread_id": thread})

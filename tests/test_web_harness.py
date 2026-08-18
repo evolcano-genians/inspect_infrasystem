@@ -27,6 +27,7 @@ def _settings(tmp_path, kubeconfig: str) -> Settings:
         wiki_dir=wiki,
         logs_dir=tmp_path / "logs",
         checkpoint_db=tmp_path / "ckpt" / "graph.sqlite",
+        agents_dir=tmp_path / ".agents",
     )
 
 

@@ -32,6 +32,7 @@ class Settings:
     wiki_dir: Path
     logs_dir: Path
     checkpoint_db: Path
+    agents_dir: Path
 
 
 def load_settings(root: Path | None = None) -> Settings:
@@ -44,6 +45,7 @@ def load_settings(root: Path | None = None) -> Settings:
         wiki_dir=root / "wiki",
         logs_dir=root / "logs",
         checkpoint_db=root / ".checkpoints" / "graph.sqlite",
+        agents_dir=root / ".agents",
     )
 
 
