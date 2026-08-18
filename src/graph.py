@@ -33,6 +33,18 @@ import os as _os
 MAX_TOOL_CALLS_PER_RUN = max(1, int(_os.environ.get("AGENT_MAX_TOOL_CALLS", "40")))
 
 
+def recommended_recursion_limit(budget: int | None = None) -> int:
+    """도구 호출 예산에서 LangGraph recursion_limit(=superstep 상한)을 유도한다.
+
+    조사 루프 1회전은 planner→executor→(formatter/route) 로 약 3 superstep을 소비한다.
+    따라서 예산(MAX_TOOL_CALLS_PER_RUN)을 다 쓰기 전에 GraphRecursionError로 죽지
+    않으려면 recursion_limit ≥ 3×예산 + 여유가 필요하다. cli/web가 하드코딩(50/60) 하던
+    값을 한 곳에서 예산과 결합해 계산한다 — 예산을 키우면 한도도 함께 커진다.
+    """
+    b = MAX_TOOL_CALLS_PER_RUN if budget is None else budget
+    return 3 * max(1, b) + 12
+
+
 class InspectorState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]
     question: str

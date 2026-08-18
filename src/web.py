@@ -37,7 +37,7 @@ from .config import (
     assert_safe_kubeconfig,
     load_settings,
 )
-from .graph import MAX_TOOL_CALLS_PER_RUN, build_graph
+from .graph import MAX_TOOL_CALLS_PER_RUN, build_graph, recommended_recursion_limit
 from .llm import make_codex_model, make_model
 from .nodes.reflector import reflect_on_state
 from .nodes.wiki_common import parse_page
@@ -189,19 +189,31 @@ def make_app(
 
     # 컨텍스트별 도구 세트 (클러스터 전환용). 기본 컨텍스트는 위에서 만든 k8s/tools 재사용.
     tools_by_context: dict[str, list] = {}
+    clients_by_context: dict[str, object] = {}  # 멀티 클러스터 비교용 read-only 클라이언트
     if available_contexts:
         from .tools.k8s_read import ReadOnlyK8sClient as _ROClient
 
         for name in available_contexts:
             if name == (context or ""):
                 tools_by_context[name] = tools
+                clients_by_context[name] = k8s
                 continue
             try:
-                tools_by_context[name] = make_tools(
-                    _ROClient(settings.kubeconfig, context=name), audit
-                )
+                _client = _ROClient(settings.kubeconfig, context=name)
+                tools_by_context[name] = make_tools(_client, audit)
+                clients_by_context[name] = _client
             except Exception as exc:  # 접근 불가 컨텍스트는 조용히 제외
                 print(f"경고: 컨텍스트 '{name}' 도구 생성 실패 — {type(exc).__name__}")
+
+    # 멀티 클러스터 비교 도구 (컨텍스트 2개 이상일 때만) — 두 k8s 상태를 나란히 대조.
+    # 모든 그래프에서 공통으로 쓰도록 extra_tools에 합친다.
+    if len(clients_by_context) >= 2:
+        from .tools.multicluster import make_multicluster_tools
+
+        try:
+            extra_tools = [*extra_tools, *make_multicluster_tools(clients_by_context, audit)]
+        except Exception as exc:
+            print(f"경고: 멀티 클러스터 비교 도구 비활성화 — {type(exc).__name__}: {exc}")
 
     def _graph_for(m, ctx_tools=None):
         return build_graph(
@@ -213,8 +225,9 @@ def make_app(
     # 추론 모드 선택: codex-oauth이고 모델이 주입되지 않았을 때만 단계별 그래프를 조립한다.
     # (허용 단계는 정책상 low|medium|high — fast/ultra는 여기서부터 존재하지 않는다.)
     graphs: dict = {}
-    # 컨텍스트별 그래프 (기본 모델 기준) — 클러스터 전환 시 사용
-    graphs_by_context: dict[str, object] = {}
+    # 컨텍스트별 그래프 — [컨텍스트][effort] 2단 매핑. 비기본 컨텍스트를 골라도 추론 모드가
+    # 그대로 반영된다(과거엔 기본 effort로 조용히 덮여 high 선택이 medium으로 실행됐음).
+    graphs_by_context: dict[str, dict[str, object]] = {}
     if model is None and settings.model_provider == "codex-oauth":
         models = {eff: make_codex_model(settings.codex_model, eff) for eff in ALLOWED_REASONING_EFFORTS}
         graphs = {eff: _graph_for(m) for eff, m in models.items()}
@@ -222,16 +235,18 @@ def make_app(
         graph = graphs[default_effort]
         reflect_model = models[default_effort]
         for name, ctx_tools in tools_by_context.items():
-            graphs_by_context[name] = (
-                graph if ctx_tools is tools else _graph_for(models[default_effort], ctx_tools)
-            )
+            if ctx_tools is tools:
+                graphs_by_context[name] = dict(graphs)  # 기본 컨텍스트: effort별 그래프 재사용
+            else:  # 다른 클러스터: effort별로 해당 컨텍스트 도구를 묶은 그래프 조립 (3개, 비용 미미)
+                graphs_by_context[name] = {eff: _graph_for(m, ctx_tools) for eff, m in models.items()}
     else:
         model = model or make_model(settings)
         default_effort = ""
         graph = _graph_for(model)
         reflect_model = model
         for name, ctx_tools in tools_by_context.items():
-            graphs_by_context[name] = graph if ctx_tools is tools else _graph_for(model, ctx_tools)
+            g = graph if ctx_tools is tools else _graph_for(model, ctx_tools)
+            graphs_by_context[name] = {"": g}
     sessions = SessionStore(settings.checkpoint_db.parent / "sessions.sqlite")
     from .devlog import DevLog
 
@@ -587,7 +602,13 @@ def make_app(
                     media_type="text/event-stream",
                 )
             if target_ctx != (context or ""):
-                selected_graph = graphs_by_context[target_ctx]
+                # 선택한 추론 모드(effort)를 유지한 채 대상 컨텍스트 그래프를 고른다.
+                ctx_graphs = graphs_by_context[target_ctx]
+                selected_graph = (
+                    ctx_graphs.get(effort)
+                    or ctx_graphs.get(default_effort)
+                    or next(iter(ctx_graphs.values()))
+                )
         sessions.touch(thread, title_candidate=question, agent=agent.name)
 
         def stream():
@@ -599,7 +620,8 @@ def make_app(
                 "agent_name": agent.name,
                 "agent_tools": list(agent.tools),
             }
-            config = {"configurable": {"thread_id": thread}, "recursion_limit": 60}
+            config = {"configurable": {"thread_id": thread},
+                      "recursion_limit": recommended_recursion_limit()}
             yield _sse({
                 "type": "start", "thread_id": thread, "reasoning": effort,
                 "context": target_ctx or context or "",

@@ -84,6 +84,11 @@ _ENVNAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 _TARGET_ARGS = frozenset({"target"})            # strix 대상 — _is_sandbox_target 이 실검증
 _TARGET_RE = re.compile(r"^[A-Za-z0-9._:/\-~]{1,300}$")
 _ENUM_ARGS: dict[str, frozenset[str]] = {"mode": frozenset({"", "quick", "standard", "deep"})}
+# 멀티 클러스터 비교(multicluster) 인자 — 실검증은 도구 내부(컨텍스트 dict·resource enum)
+_CONTEXT_ARGS = frozenset({"context"})          # 비교 대상 컨텍스트명 (kube context)
+_CONTEXT_RE = re.compile(r"^[A-Za-z0-9_.@:/\-]{1,253}$")
+_RESOURCE_ARGS = frozenset({"resource"})        # 비교 리소스 종류 (list_* 매핑 키)
+_RESOURCE_RE = re.compile(r"^[a-z]{1,32}$")
 # 자유 텍스트 인자 → 길이 상한만. 실검증은 도구 내부(SQL 파서·샌드박스 격리)가 수행.
 _FREETEXT_ARGS: dict[str, int] = {"sql": 20_000, "command": 10_000, "instruction": 2_000}
 
@@ -177,6 +182,14 @@ def _validate_arg(key: str, value: object) -> str | None:
     if key in _ENUM_ARGS:
         if value not in _ENUM_ARGS[key]:
             return f"인자 '{key}' 값 {value!r} 은 {sorted(_ENUM_ARGS[key])} 중 하나여야 합니다"
+        return None
+    if key in _CONTEXT_ARGS:
+        if not isinstance(value, str) or not _CONTEXT_RE.match(value):
+            return f"인자 '{key}' 값 {value!r} 이 유효한 컨텍스트명이 아닙니다"
+        return None
+    if key in _RESOURCE_ARGS:
+        if not isinstance(value, str) or not _RESOURCE_RE.match(value):
+            return f"인자 '{key}' 값 {value!r} 이 유효한 리소스 종류가 아닙니다"
         return None
     if key in _FREETEXT_ARGS:
         cap = _FREETEXT_ARGS[key]

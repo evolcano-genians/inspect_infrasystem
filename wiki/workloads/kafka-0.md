@@ -22,3 +22,4 @@ type: workload
 - 2026-08-18T22:08:07+00:00: phase=Running
 - 2026-08-18T22:08:07+00:00: 리소스 사용량 — kafka: cpu=646m mem=745508Ki
 - 2026-08-18T23:05:47+00:00: phase=Running
+- 2026-08-18T23:28:20+00:00: phase=Running

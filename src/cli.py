@@ -15,7 +15,7 @@ from langgraph.errors import GraphRecursionError
 
 from .audit import AuditLogger
 from .config import assert_safe_kubeconfig, load_settings
-from .graph import build_graph
+from .graph import build_graph, recommended_recursion_limit
 from .llm import make_model
 from .tools.k8s_read import ReadOnlyK8sClient
 
@@ -54,7 +54,8 @@ def main(argv: list[str] | None = None) -> None:
     try:
         result = graph.invoke(
             {"question": args.question, "session_id": thread, "messages": [HumanMessage(args.question)]},
-            config={"configurable": {"thread_id": thread}, "recursion_limit": 50},
+            config={"configurable": {"thread_id": thread},
+                    "recursion_limit": recommended_recursion_limit()},
         )
     except GraphRecursionError:
         print("오류: 그래프 재귀 한도에 도달했습니다. --thread 를 새 값으로 바꿔 다시 시도하세요.")
