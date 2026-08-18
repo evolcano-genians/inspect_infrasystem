@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -62,6 +62,7 @@ class Settings:
     trino_token: str = ""
     trino_catalog: str = ""
     trino_schema: str = ""
+    shell_envs: dict = field(default_factory=dict)  # nexus-shell HTTP 조사 환경 (SHELL_*)
 
 
 def load_settings(root: Path | None = None) -> Settings:
@@ -86,7 +87,14 @@ def load_settings(root: Path | None = None) -> Settings:
         trino_token=os.environ.get("TRINO_TOKEN", ""),
         trino_catalog=os.environ.get("TRINO_CATALOG", ""),
         trino_schema=os.environ.get("TRINO_SCHEMA", ""),
+        shell_envs=_load_shell_envs(),
     )
+
+
+def _load_shell_envs() -> dict:
+    from .tools.shell_http import load_shell_envs
+
+    return load_shell_envs(dict(os.environ))
 
 
 def resolve_contexts(kubeconfig: str) -> tuple[list[str], str]:

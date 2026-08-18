@@ -29,6 +29,7 @@ ALLOWED_VERBS: frozenset[str] = frozenset(
         "source-read",  # SSH 개발 서버 소스 read-only 조회 (source_reader)
         "sandbox-exec",  # 샌드박스 격리 컨테이너 실행 (bash/pentest — 실 인프라 도달 불가)
         "sql-read",  # Trino read-only SQL 조회 (trino_reader — SELECT/SHOW/DESCRIBE만)
+        "http-read",  # nexus-shell 로그인 후 read-only HTTP 조회 (shell_http)
     }
 )
 

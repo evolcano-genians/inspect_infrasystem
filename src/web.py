@@ -178,6 +178,14 @@ def make_app(
             ), audit)]
         except Exception as exc:
             print(f"경고: Trino 도구 비활성화 — {type(exc).__name__}: {exc}")
+    # nexus-shell HTTP 조사 도구 (SHELL_ENVS 설정 시)
+    if settings.shell_envs:
+        from .tools.shell_http import make_shell_http_tools
+
+        try:
+            extra_tools = [*extra_tools, *make_shell_http_tools(settings.shell_envs, audit)]
+        except Exception as exc:
+            print(f"경고: nexus-shell HTTP 도구 비활성화 — {type(exc).__name__}: {exc}")
 
     # 컨텍스트별 도구 세트 (클러스터 전환용). 기본 컨텍스트는 위에서 만든 k8s/tools 재사용.
     tools_by_context: dict[str, list] = {}

@@ -36,6 +36,7 @@ def _all_tool_names() -> set[str]:
         def containers(self):
             return type("C", (), {"run": lambda *a, **k: None})()
 
+    from src.tools.shell_http import load_shell_envs, make_shell_http_tools
     from src.tools.trino_reader import TrinoConfig, make_trino_tools
 
     k8s_tools = make_tools(WideStub())
@@ -46,7 +47,11 @@ def _all_tool_names() -> set[str]:
         runner=lambda *a, **k: None,
     )
     trino_tools = make_trino_tools(TrinoConfig(endpoint="http://trino:8080"))
-    return {t.name for t in [*k8s_tools, *src_tools, *sec_tools, *trino_tools]}
+    shell_tools = make_shell_http_tools(load_shell_envs({
+        "SHELL_ENVS": "vm", "SHELL_VM_BASE": "https://x",
+        "SHELL_VM_USER": "u", "SHELL_VM_PASSWORD": "p",
+    }))
+    return {t.name for t in [*k8s_tools, *src_tools, *sec_tools, *trino_tools, *shell_tools]}
 
 
 def test_every_agent_tool_mapping_points_to_real_tools():
