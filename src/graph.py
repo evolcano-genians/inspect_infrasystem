@@ -17,6 +17,7 @@ from langgraph.graph.message import add_messages
 from .audit import AuditLogger
 from .nodes.formatter import compact_text, formatter_node
 from .nodes.planner import make_planner_node
+from .nodes.reflector import load_lessons, make_reflector_node
 from .nodes.wiki_reader import make_wiki_reader_node
 from .nodes.wiki_writer import make_wiki_writer_node
 from .tools import verb_validator
@@ -45,6 +46,10 @@ class InspectorState(TypedDict, total=False):
     tool_trace: list
     final_answer: str
     agent_instructions: str  # 선택된 에이전트 정의(.agents/*.md)의 추가 시스템 지시
+    agent_name: str  # 선택된 에이전트 이름 (교훈 파일 매칭용)
+    lessons: str  # 축적된 교훈 (wiki/lessons/<agent>.md 최근 항목 — 플래너에 주입)
+    last_lesson: str  # 이번 run에서 새로 배운 교훈 (reflector 산출)
+    last_proposal: str  # 이번 run에서 생성된 스킬 개선 제안 파일명
     usage: dict  # run 단위 토큰 사용량 누적 {input_tokens, output_tokens, total_tokens, llm_calls}
 
 
@@ -140,14 +145,31 @@ def build_graph(
     checkpointer=None,
     interrupt_before: list[str] | None = None,
     tools: list | None = None,
+    agents_dir=None,
 ):
     tools = tools if tools is not None else make_tools(k8s, audit)
+    from pathlib import Path as _Path
+
+    agents_dir = _Path(agents_dir) if agents_dir else _Path(wiki_dir).parent / ".agents"
+
+    base_reader = make_wiki_reader_node(wiki_dir)
+
+    def wiki_reader_with_lessons(state: dict) -> dict:
+        out = base_reader(state)
+        # 자가 진화 루프의 '읽기' 절반: 과거 run에서 배운 교훈을 이번 run에 주입
+        out["lessons"] = load_lessons(wiki_dir, str(state.get("agent_name") or "inspector"))
+        return out
+
     graph = StateGraph(InspectorState)
-    graph.add_node("wiki_reader", make_wiki_reader_node(wiki_dir))
+    graph.add_node("wiki_reader", wiki_reader_with_lessons)
     graph.add_node("planner", make_planner_node(model, tools))
     graph.add_node("executor", make_executor_node(tools, audit))
     graph.add_node("formatter", formatter_node)
     graph.add_node("wiki_writer", make_wiki_writer_node(wiki_dir))
+    graph.add_node(
+        "reflector",
+        make_reflector_node(model, _Path(wiki_dir), agents_dir, MAX_TOOL_CALLS_PER_RUN),
+    )
     graph.add_edge(START, "wiki_reader")
     graph.add_edge("wiki_reader", "planner")
     graph.add_conditional_edges(
@@ -155,5 +177,6 @@ def build_graph(
     )
     graph.add_edge("executor", "formatter")
     graph.add_edge("formatter", "planner")
-    graph.add_edge("wiki_writer", END)
+    graph.add_edge("wiki_writer", "reflector")
+    graph.add_edge("reflector", END)
     return graph.compile(checkpointer=checkpointer, interrupt_before=interrupt_before or [])

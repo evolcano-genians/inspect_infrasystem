@@ -57,6 +57,11 @@ def make_planner_node(model: BaseChatModel, tools: list):
         parts = [SYSTEM_PROMPT]
         if agent_extra:
             parts.append(f"[에이전트 특화 지시]\n{agent_extra}")
+        lessons = (state.get("lessons") or "").strip()
+        if lessons:
+            parts.append(
+                "[축적된 교훈 — 과거 run에서 스스로 배운 조사 전략. 반드시 반영하라]\n" + lessons
+            )
         parts.append(f"[위키 컨텍스트]\n{wiki_context}")
         system = SystemMessage(content="\n\n".join(parts))
         response = bound.invoke([system, *sanitize_history(state["messages"])])

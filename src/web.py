@@ -37,8 +37,9 @@ from .config import (
     assert_safe_kubeconfig,
     load_settings,
 )
-from .graph import build_graph
+from .graph import MAX_TOOL_CALLS_PER_RUN, build_graph
 from .llm import make_codex_model, make_model
+from .nodes.reflector import reflect_on_state
 from .nodes.wiki_common import parse_page
 from .nodes.wiki_writer import redact_text
 from .sessions import SessionStore
@@ -133,21 +134,23 @@ def make_app(
     def _graph_for(m):
         return build_graph(
             model=m, k8s=k8s, wiki_dir=settings.wiki_dir, audit=audit,
-            checkpointer=checkpointer, tools=tools,
+            checkpointer=checkpointer, tools=tools, agents_dir=settings.agents_dir,
         )
 
     # 추론 모드 선택: codex-oauth이고 모델이 주입되지 않았을 때만 단계별 그래프를 조립한다.
     # (허용 단계는 정책상 low|medium|high — fast/ultra는 여기서부터 존재하지 않는다.)
     graphs: dict = {}
     if model is None and settings.model_provider == "codex-oauth":
-        for eff in ALLOWED_REASONING_EFFORTS:
-            graphs[eff] = _graph_for(make_codex_model(settings.codex_model, eff))
+        models = {eff: make_codex_model(settings.codex_model, eff) for eff in ALLOWED_REASONING_EFFORTS}
+        graphs = {eff: _graph_for(m) for eff, m in models.items()}
         default_effort = settings.codex_reasoning_effort
         graph = graphs[default_effort]
+        reflect_model = models[default_effort]
     else:
         model = model or make_model(settings)
         default_effort = ""
         graph = _graph_for(model)
+        reflect_model = model
     sessions = SessionStore(settings.checkpoint_db.parent / "sessions.sqlite")
     agents = load_agents(settings.agents_dir)
 
@@ -189,6 +192,72 @@ def make_app(
                 "real_cluster": settings.allow_real_cluster,
             }
         )
+
+    # ---------- 자가 진화: 스킬 개선 제안 (사람 승인 게이트) ----------
+    # reflector가 생성한 제안(.agents/proposals/)은 여기서 검토·적용·폐기된다.
+    # 적용은 기존 PUT /api/agents/{name}/raw 를 통해서만 이뤄진다 (name 일치 강제).
+
+    _PROPOSAL_FILE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}-\d{8}-\d{6}\.md$")
+
+    def _proposal_path(file: str):
+        if not _PROPOSAL_FILE_RE.match(file):
+            return None
+        return settings.agents_dir / "proposals" / file
+
+    @app.get("/api/proposals")
+    def list_proposals() -> JSONResponse:
+        directory = settings.agents_dir / "proposals"
+        items = []
+        if directory.is_dir():
+            for path in sorted(directory.glob("*.md"), reverse=True):
+                if _PROPOSAL_FILE_RE.match(path.name):
+                    frontmatter, _ = parse_page(path)
+                    items.append(
+                        {
+                            "file": path.name,
+                            "name": str(frontmatter.get("name") or path.name.rsplit("-", 2)[0]),
+                            "proposed_at": str(frontmatter.get("proposed_at") or ""),
+                        }
+                    )
+        return JSONResponse({"proposals": items})
+
+    @app.get("/api/proposals/{file}")
+    def proposal_detail(file: str) -> JSONResponse:
+        path = _proposal_path(file)
+        if path is None or not path.is_file():
+            return JSONResponse({"error": f"제안 없음: {file}"}, status_code=404)
+        frontmatter, _ = parse_page(path)
+        return JSONResponse(
+            {
+                "file": file,
+                "name": str(frontmatter.get("name") or ""),
+                "content": path.read_text(encoding="utf-8"),
+            }
+        )
+
+    @app.delete("/api/proposals/{file}")
+    def remove_proposal(file: str) -> JSONResponse:
+        path = _proposal_path(file)
+        if path is None or not path.is_file():
+            return JSONResponse({"error": f"제안 없음: {file}"}, status_code=404)
+        path.unlink()
+        return JSONResponse({"removed": True})
+
+    @app.post("/api/sessions/{thread_id}/reflect")
+    def reflect_session(thread_id: str) -> JSONResponse:
+        """수동 반성 — 해당 세션의 마지막 run에서 교훈/제안을 도출한다."""
+        if not _THREAD_ID_RE.match(thread_id):
+            return JSONResponse({"error": "thread_id 형식이 올바르지 않습니다"}, status_code=400)
+        state = graph.get_state({"configurable": {"thread_id": thread_id}})
+        values = state.values or {}
+        if not values.get("question"):
+            return JSONResponse({"error": "반성할 run이 없습니다"}, status_code=404)
+        with invoke_lock:
+            outcome = reflect_on_state(
+                reflect_model, settings.wiki_dir, settings.agents_dir, values,
+                max_tool_calls=MAX_TOOL_CALLS_PER_RUN, force=True,
+            )
+        return JSONResponse(outcome or {"note": "학습할 내용이 도출되지 않았습니다"})
 
     # ---------- 에이전트/도구 카탈로그 (Claude Code의 .claude/agents 패턴) ----------
     # 에이전트는 플래너 프롬프트만 바꾼다 — 도구·verb 화이트리스트·전송 가드는 전 에이전트 동일.
@@ -412,6 +481,7 @@ def make_app(
                 "session_id": thread,
                 "messages": [HumanMessage(question)],
                 "agent_instructions": agent.instructions,
+                "agent_name": agent.name,
             }
             config = {"configurable": {"thread_id": thread}, "recursion_limit": 60}
             yield _sse({"type": "start", "thread_id": thread, "reasoning": effort})
@@ -455,6 +525,15 @@ def make_app(
                                 yield _sse(
                                     {"type": "final", "answer": out.get("final_answer") or ""}
                                 )
+                            elif node == "reflector":
+                                if out.get("last_lesson") or out.get("last_proposal"):
+                                    yield _sse(
+                                        {
+                                            "type": "evolution",
+                                            "lesson": out.get("last_lesson") or "",
+                                            "proposal": out.get("last_proposal") or "",
+                                        }
+                                    )
             except GraphRecursionError:
                 yield _sse({"type": "error", "message": "그래프 재귀 한도 도달 — 새 세션으로 다시 시도하세요"})
             except Exception as exc:  # LLM 인증 실패 등 — 브라우저에 원인만 전달

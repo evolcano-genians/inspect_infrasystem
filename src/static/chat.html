@@ -167,8 +167,9 @@
   <div class="section-label">에이전트 · 스킬</div>
   <div id="agents"></div>
   <button class="newBtn" id="newAgentBtn" type="button">＋ 새 에이전트·스킬</button>
-  <div class="section-label">지식</div>
+  <div class="section-label">지식 · 진화</div>
   <button class="newBtn" id="wikiBtn" type="button">📚 위키 보기·편집</button>
+  <button class="newBtn" id="reflectBtn" type="button">🧬 이 세션에서 배우기</button>
   <details id="toolsBox">
     <summary>🛠 사용 가능한 도구</summary>
     <div id="tools"></div>
@@ -412,7 +413,7 @@ async function openWikiPage(path, itemEl) {
   if (itemEl) itemEl.classList.add("active");
 }
 
-function renderAgentSideList(activeName) {
+async function renderAgentSideList(activeName) {
   ovList.innerHTML = "";
   const sec = document.createElement("div");
   sec.className = "sec";
@@ -425,6 +426,35 @@ function renderAgentSideList(activeName) {
     item.addEventListener("click", () => openAgentEditor(a.name));
     ovList.appendChild(item);
   }
+  try {
+    const data = await (await fetch("/api/proposals")).json();
+    if ((data.proposals || []).length) {
+      const psec = document.createElement("div");
+      psec.className = "sec";
+      psec.textContent = "🧬 자가 진화 제안";
+      ovList.appendChild(psec);
+      for (const p of data.proposals) {
+        const item = document.createElement("div");
+        item.className = "item";
+        item.textContent = "📝 " + p.name + " · " + (p.proposed_at || "");
+        item.title = p.file;
+        item.addEventListener("click", () => openProposal(p));
+        ovList.appendChild(item);
+      }
+    }
+  } catch (e) { /* 무시 */ }
+}
+
+async function openProposal(p) {
+  const res = await fetch("/api/proposals/" + encodeURIComponent(p.file));
+  if (!res.ok) { ovStatusMsg("제안을 열 수 없습니다", true); return; }
+  const data = await res.json();
+  overlay.hidden = false;
+  ovCtx = { kind: "agent", name: data.name, fromProposal: p.file };
+  ovTitle.textContent = "🧬 자가 진화 제안 검토 → " + data.name;
+  ovText.value = data.content;
+  ovStatusMsg("검토·수정 후 저장하면 에이전트에 적용되고 제안은 제거됩니다. 닫으면 보류됩니다.");
+  renderAgentSideList(data.name);
 }
 
 async function openAgentEditor(name) {
@@ -476,7 +506,13 @@ document.getElementById("ovSave").addEventListener("click", async () => {
       });
       const data = await res.json();
       if (!res.ok) { ovStatusMsg(data.error || "저장 실패", true); return; }
-      ovStatusMsg("저장됨 ✓ — 다음 질의부터 반영됩니다");
+      if (ovCtx.fromProposal) {
+        await fetch("/api/proposals/" + encodeURIComponent(ovCtx.fromProposal), { method: "DELETE" });
+        ovCtx.fromProposal = null;
+        ovStatusMsg("제안 승인·적용됨 ✓ — 다음 질의부터 반영됩니다");
+      } else {
+        ovStatusMsg("저장됨 ✓ — 다음 질의부터 반영됩니다");
+      }
       await loadAgents();
       renderAgentSideList(ovCtx.name);
     } else if (ovCtx.kind === "agent-new") {
@@ -646,11 +682,31 @@ function handleEvent(ev) {
     case "final":
       renderAgent(ev.answer || "(답변 없음)");
       break;
+    case "evolution":
+      if (ev.lesson) addEvent("🧬 자가 진화 — 교훈 학습: " + ev.lesson);
+      if (ev.proposal) addEvent("🧬 스킬 개선 제안 생성: " + ev.proposal + " (에이전트 편집기 ✎에서 검토·승인)");
+      break;
     case "error":
       addEvent("⛔ " + ev.message).classList.add("error");
       break;
   }
 }
+
+document.getElementById("reflectBtn").addEventListener("click", async () => {
+  if (!threadId) return;
+  const waiting = addEvent("🧬 이 세션의 마지막 조사를 반성하는 중…");
+  try {
+    const res = await fetch("/api/sessions/" + threadId + "/reflect", { method: "POST" });
+    const d = await res.json();
+    waiting.remove();
+    if (d.lesson) addEvent("🧬 교훈 학습: " + d.lesson);
+    else addEvent("🧬 " + (d.note || d.error || "학습할 내용이 도출되지 않았습니다"));
+    if (d.proposal_file) addEvent("🧬 스킬 개선 제안 생성: " + d.proposal_file + " (에이전트 편집기 ✎에서 검토·승인)");
+  } catch (err) {
+    waiting.remove();
+    addEvent("⛔ 반성 실패: " + err.message).classList.add("error");
+  }
+});
 
 form.addEventListener("submit", e => {
   e.preventDefault();

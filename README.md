@@ -153,6 +153,25 @@ wiki/
   `password|token|secret|key|credential` 류 키의 값과 base64로 보이는 긴 문자열은 `[REDACTED]` 치환.
 - 위키는 git으로 버전관리하며 사람이 직접 읽고 수정할 수 있는 일반 Markdown이다.
 
+### 자가 진화 (self-evolution)
+
+에이전트는 세 층위로 스스로 진화한다. **안전 불변식: 능력·권한(도구 목록·verb 화이트리스트·
+전송 가드)은 절대 진화하지 않는다** — 진화 대상은 지식과 프롬프트뿐이며, reflector 코드가
+쓸 수 있는 경로는 `wiki/lessons/`와 `.agents/proposals/` 두 곳으로 하드코딩되어 있다.
+
+| 층위 | 메커니즘 | 적용 방식 |
+|---|---|---|
+| 지식 | 위키 관찰 축적 (`wiki_writer`) | 자동 — 다음 질의에서 재조사 없이 재사용 |
+| 교훈 | run의 신호(예산 소진·호출 거부·도구 오류)를 반성해 `wiki/lessons/<agent>.md`에 append | 자동 — 최근 교훈이 플래너 프롬프트에 주입되어 행동이 바뀜 |
+| 스킬 | 에이전트 정의 개선안을 `.agents/proposals/`에 생성 | **사람 승인 게이트** — UI에서 검토 후 저장해야 적용 |
+
+- 반성(reflection)은 학습 신호가 있는 run에서 자동 실행되고(비용 절약),
+  UI의 "🧬 이 세션에서 배우기" 버튼으로 아무 run에나 수동 실행할 수 있다.
+- 교훈·제안 모두 레다크션 필터를 통과하고 git으로 버전관리된다 — 사람이 언제든
+  검토·수정·롤백할 수 있으며, 교훈 파일은 위키 편집기에서도 직접 다듬을 수 있다.
+- 실측: 실 dev 클러스터 전수 스캔으로 예산이 소진된 run을 반성시키자 "범위를 먼저
+  좁혀라 + read-only 한계를 명시하고 재현 절차를 제시하라"는 교훈을 스스로 도출했다.
+
 ### 관측성 — audit 로그와 위키의 분리
 
 모든 도구 호출을 `logs/audit-<date>.jsonl`에 append-only JSON으로 기록: `timestamp`,
@@ -310,6 +329,7 @@ KUBECONFIG=.local/kind-kubeconfig.yaml MODEL_PROVIDER=codex-oauth \
 | 11 | 웹 하네스 — SSE 스트림, 웹 경유 우회 시도 거부, 입력 검증, 마스터 kubeconfig fail-fast | `test_web_harness.py` | ✗ |
 | 12 | 에이전트 카탈로그·세션 관리 — .agents 로딩, 프롬프트 주입, 세션별 context 격리/복원/삭제, 추론 단계 정책 | `test_agents.py` | ✗ |
 | 13 | 편집 API — 위키 편집 시 레다크션 강제·경로 조작 차단, 에이전트 편집/생성·리로드 | `test_editor_api.py` | ✗ |
+| 14 | 자가 진화 — 신호 감지·교훈 축적(레다크션)·프롬프트 주입·제안 승인 게이트 | `test_evolution.py` | ✗ |
 
 클러스터 필요 테스트는 `KUBECONFIG` 미설정 시 skip 처리되지만, **공식 검증 절차(§6)는 반드시
 샌드박스를 대상으로 전체 실행**한다.
