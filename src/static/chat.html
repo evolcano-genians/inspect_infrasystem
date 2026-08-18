@@ -87,6 +87,11 @@
   .agent { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
   .agent pre, .agent code { background: var(--chip); border-radius: 6px; padding: 1px 5px; font-size: 13px; overflow-x: auto; }
   .agent pre { padding: 8px 10px; }
+  .feedback { margin-top: 8px; display: flex; gap: 4px; }
+  .feedback button { border: 1px solid var(--line); background: transparent; border-radius: 7px;
+    cursor: pointer; font-size: 13px; padding: 2px 8px; opacity: .6; }
+  .feedback button:hover { opacity: 1; }
+  .feedback button.fb-on { opacity: 1; border-color: var(--accent); background: var(--chip); }
   .event {
     align-self: flex-start; font-size: 12.5px; color: var(--muted);
     background: var(--chip); border-radius: 10px; padding: 5px 10px;
@@ -307,7 +312,7 @@ function addToolResult(name, status, preview) {
   log.scrollTop = log.scrollHeight;
 }
 
-function renderAgent(text) {
+function renderAgent(text, turnId) {
   const node = el("div", "msg agent");
   const parts = text.split(/```/);
   parts.forEach((part, i) => {
@@ -327,6 +332,27 @@ function renderAgent(text) {
       });
     }
   });
+  if (turnId) {
+    const fb = document.createElement("div");
+    fb.className = "feedback";
+    for (const [label, rating, title] of [["👍", "good", "정확·유용"], ["👎", "bad", "부정확·개선 필요"], ["📝", "note", "메모 남기기"]]) {
+      const b = document.createElement("button");
+      b.textContent = label; b.title = title;
+      b.addEventListener("click", async () => {
+        let note = "";
+        if (rating === "note") { note = prompt("개선 메모 (이 답변에 대해):") || ""; if (!note) return; }
+        await fetch("/api/feedback", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ turn_id: turnId, rating, note }),
+        });
+        fb.querySelectorAll("button").forEach(x => x.classList.remove("fb-on"));
+        b.classList.add("fb-on");
+        addEvent("🧩 피드백 기록됨 (하네스 개선에 활용) — " + title);
+      });
+      fb.appendChild(b);
+    }
+    node.appendChild(fb);
+  }
   log.scrollTop = log.scrollHeight;
 }
 
@@ -701,7 +727,7 @@ function handleEvent(ev) {
         " (LLM 호출 " + (ev.llm_calls || 0) + "회)";
       break;
     case "final":
-      renderAgent(ev.answer || "(답변 없음)");
+      renderAgent(ev.answer || "(답변 없음)", ev.turn_id);
       break;
     case "evolution":
       if (ev.lesson) addEvent("🧬 자가 진화 — 교훈 학습: " + ev.lesson);

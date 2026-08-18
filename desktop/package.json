@@ -17,7 +17,7 @@
   "build": {
     "appId": "com.genians.inspect-k8s",
     "productName": "inspect-k8s",
-    "files": ["main.js", "preload.js", "splash.html"],
+    "files": ["main.js", "preload.js", "splash.html", "updater.js"],
     "mac": { "category": "public.app-category.developer-tools", "target": ["dir"] }
   }
 }

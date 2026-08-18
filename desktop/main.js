@@ -12,8 +12,28 @@ const { spawn } = require("child_process");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
+const { checkAndPull } = require("./updater");
 
-const PROJECT_ROOT = path.resolve(__dirname, "..");
+const UPDATE_INTERVAL_MS = 30 * 60 * 1000; // 30분마다 자동 확인
+let updateTimer = null;
+
+// 프로젝트 소스 위치. 패키징된 .app은 번들 밖의 실제 저장소를 가리켜야 하므로,
+// 환경변수 > 저장된 설정 > 개발 기본값(../) 순으로 해석한다.
+function resolveProjectRoot() {
+  if (process.env.INSPECT_K8S_PROJECT) return process.env.INSPECT_K8S_PROJECT;
+  const cfgPath = path.join(app.getPath("userData"), "project-root");
+  try {
+    const saved = fs.readFileSync(cfgPath, "utf-8").trim();
+    if (saved && fs.existsSync(path.join(saved, "src", "web.py"))) return saved;
+  } catch (_) {}
+  // 개발 실행(npm start)에서는 desktop/의 상위가 저장소다.
+  const devRoot = path.resolve(__dirname, "..");
+  if (fs.existsSync(path.join(devRoot, "src", "web.py"))) return devRoot;
+  // 패키징된 기본값 (설치 환경) — 실제 저장소 경로로 고정.
+  return "/Users/shinhheejoon/PycharmProjects/inspect-k8s";
+}
+
+const PROJECT_ROOT = resolveProjectRoot();
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.INSPECT_K8S_PORT || 8799);
 const BASE_URL = `http://${HOST}:${PORT}`;
@@ -127,6 +147,42 @@ function createWindow() {
   mainWindow.on("closed", () => (mainWindow = null));
 }
 
+function restartBackend() {
+  if (serverProc) {
+    try { serverProc.kill("SIGTERM"); } catch (_) {}
+    serverProc = null;
+  }
+  serverReady = false;
+  serverStderr = [];
+  startServer();
+  if (mainWindow) {
+    mainWindow.loadFile(path.join(__dirname, "splash.html"));
+    waitForServer().then(() => { serverReady = true; mainWindow.loadURL(BASE_URL); }).catch(() => {});
+  }
+}
+
+// 주기적 자동 업데이트: 최신을 당겨 변경이 있으면 백엔드 재시작으로 반영.
+async function runAutoUpdate(interactive) {
+  try {
+    const r = await checkAndPull();
+    if (r.updated) {
+      restartBackend();
+      if (mainWindow) {
+        const n = new (require("electron").Notification)({
+          title: "inspect-k8s 업데이트 적용됨",
+          body: `${r.from} → ${r.to} (${r.remote}). 새 기능이 반영되었습니다.`,
+        });
+        n.show();
+      }
+    } else if (interactive && mainWindow) {
+      dialog.showMessageBox(mainWindow, {
+        type: "info", message: "업데이트 확인 완료",
+        detail: r.reason || "이미 최신 버전입니다.",
+      });
+    }
+  } catch (_) { /* 업데이트 실패는 조용히 무시 (오프라인 등) */ }
+}
+
 function buildMenu() {
   const template = [
     ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
@@ -134,6 +190,7 @@ function buildMenu() {
       label: "보기",
       submenu: [
         { label: "새로고침", accelerator: "CmdOrCtrl+R", click: () => mainWindow && mainWindow.reload() },
+        { label: "업데이트 확인", click: () => runAutoUpdate(true) },
         { role: "toggleDevTools" },
         { type: "separator" },
         { role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" },
@@ -146,16 +203,20 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // 시작 시 자동 업데이트: 백엔드 기동 전에 최신 소스를 먼저 당긴다(로컬 변경 없을 때만).
+  await runAutoUpdate(false).catch(() => {});
   startServer();
   buildMenu();
   createWindow();
+  updateTimer = setInterval(() => runAutoUpdate(false), UPDATE_INTERVAL_MS);
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
 function shutdown() {
+  if (updateTimer) { clearInterval(updateTimer); updateTimer = null; }
   if (serverProc) {
     try { serverProc.kill("SIGTERM"); } catch (_) {}
     serverProc = null;

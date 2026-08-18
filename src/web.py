@@ -233,6 +233,9 @@ def make_app(
         for name, ctx_tools in tools_by_context.items():
             graphs_by_context[name] = graph if ctx_tools is tools else _graph_for(model, ctx_tools)
     sessions = SessionStore(settings.checkpoint_db.parent / "sessions.sqlite")
+    from .devlog import DevLog
+
+    devlog = DevLog(settings.logs_dir)
     agents = load_agents(settings.agents_dir)
 
     def _reload_agents() -> None:
@@ -430,6 +433,22 @@ def make_app(
         _reload_agents()
         return JSONResponse({"created": True, "name": name})
 
+    # ---------- 개발 피드백 로그 (하네스 개선용) ----------
+
+    class FeedbackRequest(BaseModel):
+        turn_id: str = Field(min_length=1, max_length=64)
+        rating: str = Field(default="note", max_length=16)
+        note: str = Field(default="", max_length=2000)
+
+    @app.post("/api/feedback")
+    def post_feedback(req: FeedbackRequest) -> JSONResponse:
+        return JSONResponse(devlog.record_feedback(
+            turn_id=req.turn_id, rating=req.rating, note=req.note))
+
+    @app.get("/api/devlog/report")
+    def devlog_report() -> JSONResponse:
+        return JSONResponse(devlog.improvement_report())
+
     # ---------- 위키 보기/편집 ----------
     # 위키는 로컬 스크래치 지식 저장소다(클러스터 리소스 아님) — 브리프가 "사람이 직접
     # 읽고 수정할 수 있어야 한다"고 요구하므로 편집을 허용하되, 저장 전 레다크션 필터를
@@ -622,9 +641,20 @@ def make_app(
                                         }
                                     )
                             elif node == "wiki_writer":
-                                yield _sse(
-                                    {"type": "final", "answer": out.get("final_answer") or ""}
-                                )
+                                final_answer = out.get("final_answer") or ""
+                                turn_id = ""
+                                try:
+                                    st = selected_graph.get_state(config).values or {}
+                                    turn_id = devlog.record_turn(
+                                        thread_id=thread, agent=agent.name,
+                                        context=target_ctx or context or "",
+                                        question=question, answer=final_answer,
+                                        tool_trace=st.get("tool_trace") or [],
+                                        usage=st.get("usage") or {}, reasoning=effort,
+                                    )
+                                except Exception:
+                                    pass
+                                yield _sse({"type": "final", "answer": final_answer, "turn_id": turn_id})
                             elif node == "reflector":
                                 if out.get("last_lesson") or out.get("last_proposal"):
                                     yield _sse(
