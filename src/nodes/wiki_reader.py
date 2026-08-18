@@ -72,8 +72,13 @@ def make_wiki_reader_node(wiki_dir: Path):
                 break
             chunks.append(chunk)
             total += len(chunk)
-        # run 시작 노드이므로 per-run 채널(observations/tool_trace)을 여기서 리셋한다 —
-        # 같은 thread를 재사용하는 다음 질의에서 과거 run의 관찰이 중복 기록되지 않게.
-        return {"wiki_context": "\n\n".join(chunks), "observations": [], "tool_trace": []}
+        # run 시작 노드이므로 per-run 채널(observations/tool_trace/usage)을 여기서 리셋한다 —
+        # 같은 thread를 재사용하는 다음 질의에서 과거 run의 값이 중복 누적되지 않게.
+        return {
+            "wiki_context": "\n\n".join(chunks),
+            "observations": [],
+            "tool_trace": [],
+            "usage": {},
+        }
 
     return wiki_reader

@@ -243,6 +243,10 @@ KUBECONFIG=.local/kind-kubeconfig.yaml MODEL_PROVIDER=codex-oauth \
   `capacity-analyst`(용량 분석). **보안 불변식**: 에이전트 정의는 프롬프트만 바꾼다 —
   도구 목록·verb 화이트리스트·전송 가드는 어떤 에이전트를 선택해도 동일하다.
   사이드바의 "사용 가능한 도구" 패널이 16개 read-only 도구 전체를 노출한다.
+- **토큰 사용량 표시**: LLM 응답의 `usage_metadata`를 run 단위로 누적해 턴마다
+  실시간 표시하고(🔢 in/out/합계·LLM 호출 수), 세션별 누적 토큰을 사이드바와 헤더에
+  보여준다 (`sessions.sqlite`에 저장). CLI도 실행 끝에 사용량을 출력한다.
+  usage를 제공하지 않는 프로바이더(fake/heuristic)에서는 표시가 생략된다.
 - **대화 연속성**: 같은 세션(thread)은 SqliteSaver 체크포인트로 이어지고, "새 세션"을 눌러도
   위키 장기 기억은 유지된다 (context는 세션별, 위키는 전 세션 공유).
 - 프로바이더: `codex-oauth`(실사용) / `heuristic`(로그인 없는 오프라인 데모) / `fake`(테스트).

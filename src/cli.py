@@ -52,6 +52,13 @@ def main(argv: list[str] | None = None) -> None:
         print(f"오류: 조사 실행에 실패했습니다 — {type(exc).__name__}: {exc}")
         raise SystemExit(1)
     print(result.get("final_answer") or "(답변 없음)")
+    usage = result.get("usage") or {}
+    if usage.get("total_tokens"):
+        print(
+            f"\n[토큰 사용량] in={usage.get('input_tokens', 0):,} "
+            f"out={usage.get('output_tokens', 0):,} "
+            f"total={usage.get('total_tokens', 0):,} (LLM 호출 {usage.get('llm_calls', 0)}회)"
+        )
 
 
 if __name__ == "__main__":

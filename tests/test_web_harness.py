@@ -119,6 +119,49 @@ def test_heuristic_model_end_to_end(tmp_path):
     assert "휴리스틱" in final["answer"]  # 데모 모드임이 명시된다
 
 
+def test_usage_events_and_session_token_totals(tmp_path):
+    """usage_metadata가 있는 모델이면 SSE usage 이벤트와 세션 누적 토큰이 기록된다."""
+    model = ScriptedChatModel(
+        script=[
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "k8s_list_pods", "args": {"namespace": "default"},
+                             "id": "c1", "type": "tool_call"}],
+                usage_metadata={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+            ),
+            AIMessage(
+                content="결론: crashloop-demo 확인.",
+                usage_metadata={"input_tokens": 200, "output_tokens": 30, "total_tokens": 230},
+            ),
+        ]
+    )
+    client = _client(tmp_path, model)
+    res = client.post("/api/chat", json={"message": "토큰 테스트", "thread_id": "tok-1"})
+    events = _sse_events(res)
+    usage_events = [e for e in events if e["type"] == "usage"]
+    assert usage_events, "usage 이벤트가 없습니다"
+    final_usage = usage_events[-1]
+    assert final_usage["input_tokens"] == 300
+    assert final_usage["output_tokens"] == 50
+    assert final_usage["total_tokens"] == 350
+    assert final_usage["llm_calls"] == 2
+
+    sess = client.get("/api/sessions").json()["sessions"][0]
+    assert sess["tokens_in"] == 300 and sess["tokens_out"] == 50
+
+    # 같은 세션 두 번째 턴 — 누적된다 (스크립트 소진 → 도구 없이 종료, usage 0 추가)
+    client.post("/api/chat", json={"message": "한 번 더", "thread_id": "tok-1"})
+    sess2 = client.get("/api/sessions").json()["sessions"][0]
+    assert sess2["tokens_in"] == 300  # usage 없는 턴은 더해지지 않음
+
+
+def test_usage_absent_for_models_without_metadata(tmp_path):
+    """fake/heuristic처럼 usage_metadata가 없는 모델은 usage 이벤트를 내지 않는다."""
+    client = _client(tmp_path, HeuristicPlannerModel())
+    res = client.post("/api/chat", json={"message": "파드 봐줘", "thread_id": "tok-2"})
+    assert not [e for e in _sse_events(res) if e["type"] == "usage"]
+
+
 def test_make_app_refuses_master_kubeconfig(tmp_path, monkeypatch):
     """웹 레이어도 fail-fast 가드를 통과해야만 뜬다."""
     fake_home = tmp_path / "home"

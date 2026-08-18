@@ -41,6 +41,7 @@ class InspectorState(TypedDict, total=False):
     tool_trace: list
     final_answer: str
     agent_instructions: str  # 선택된 에이전트 정의(.agents/*.md)의 추가 시스템 지시
+    usage: dict  # run 단위 토큰 사용량 누적 {input_tokens, output_tokens, total_tokens, llm_calls}
 
 
 def make_executor_node(tools: list, audit: AuditLogger | None):

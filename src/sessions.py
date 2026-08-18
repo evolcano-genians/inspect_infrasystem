@@ -24,6 +24,8 @@ class SessionMeta:
     updated_at: str
     turns: int
     agent: str
+    tokens_in: int
+    tokens_out: int
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -48,16 +50,32 @@ class SessionStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     turns INTEGER NOT NULL DEFAULT 0,
-                    agent TEXT NOT NULL DEFAULT 'inspector'
+                    agent TEXT NOT NULL DEFAULT 'inspector',
+                    tokens_in INTEGER NOT NULL DEFAULT 0,
+                    tokens_out INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
-            # 구버전 DB 마이그레이션: agent 컬럼이 없으면 추가
+            # 구버전 DB 마이그레이션: 없는 컬럼 추가
             cols = {r[1] for r in self._conn.execute("PRAGMA table_info(sessions)").fetchall()}
-            if "agent" not in cols:
-                self._conn.execute(
-                    "ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'inspector'"
-                )
+            migrations = {
+                "agent": "ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'inspector'",
+                "tokens_in": "ALTER TABLE sessions ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0",
+                "tokens_out": "ALTER TABLE sessions ADD COLUMN tokens_out INTEGER NOT NULL DEFAULT 0",
+            }
+            for col, ddl in migrations.items():
+                if col not in cols:
+                    self._conn.execute(ddl)
+            self._conn.commit()
+
+    def add_usage(self, thread_id: str, tokens_in: int, tokens_out: int) -> None:
+        """run 종료 후 세션 누적 토큰 사용량을 더한다."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE sessions SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ? "
+                "WHERE thread_id = ?",
+                (max(0, int(tokens_in)), max(0, int(tokens_out)), thread_id),
+            )
             self._conn.commit()
 
     def touch(self, thread_id: str, title_candidate: str = "", agent: str = "") -> SessionMeta:
@@ -94,7 +112,7 @@ class SessionStore:
     def get(self, thread_id: str) -> SessionMeta | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT thread_id, title, created_at, updated_at, turns, agent "
+                "SELECT thread_id, title, created_at, updated_at, turns, agent, tokens_in, tokens_out "
                 "FROM sessions WHERE thread_id = ?",
                 (thread_id,),
             ).fetchone()
@@ -103,7 +121,7 @@ class SessionStore:
     def list(self, limit: int = 100) -> list[SessionMeta]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT thread_id, title, created_at, updated_at, turns, agent "
+                "SELECT thread_id, title, created_at, updated_at, turns, agent, tokens_in, tokens_out "
                 "FROM sessions ORDER BY updated_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()

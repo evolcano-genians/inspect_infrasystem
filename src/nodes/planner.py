@@ -34,6 +34,12 @@ def make_planner_node(model: BaseChatModel, tools: list):
         parts.append(f"[위키 컨텍스트]\n{wiki_context}")
         system = SystemMessage(content="\n\n".join(parts))
         response = bound.invoke([system, *state["messages"]])
-        return {"messages": [response]}
+        # 토큰 사용량 누적 (usage_metadata를 제공하는 모델만 — fake/heuristic은 0 유지)
+        usage = dict(state.get("usage") or {})
+        usage["llm_calls"] = usage.get("llm_calls", 0) + 1
+        meta = getattr(response, "usage_metadata", None) or {}
+        for key in ("input_tokens", "output_tokens", "total_tokens"):
+            usage[key] = usage.get(key, 0) + int(meta.get(key) or 0)
+        return {"messages": [response], "usage": usage}
 
     return planner

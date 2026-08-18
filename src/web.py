@@ -210,6 +210,7 @@ def make_app(
             }
             config = {"configurable": {"thread_id": thread}, "recursion_limit": 60}
             yield _sse({"type": "start", "thread_id": thread})
+            last_usage: dict = {}
             try:
                 with invoke_lock:
                     for update in graph.stream(payload, config=config, stream_mode="updates"):
@@ -221,6 +222,10 @@ def make_app(
                                 if chars:
                                     yield _sse({"type": "wiki", "chars": chars})
                             elif node == "planner":
+                                usage = out.get("usage") or {}
+                                if usage.get("total_tokens"):
+                                    last_usage = usage
+                                    yield _sse({"type": "usage", **usage})
                                 for msg in out.get("messages") or []:
                                     for tc in getattr(msg, "tool_calls", None) or []:
                                         yield _sse(
@@ -249,6 +254,12 @@ def make_app(
                 yield _sse({"type": "error", "message": "그래프 재귀 한도 도달 — 새 세션으로 다시 시도하세요"})
             except Exception as exc:  # LLM 인증 실패 등 — 브라우저에 원인만 전달
                 yield _sse({"type": "error", "message": f"{type(exc).__name__}: {exc}"})
+            if last_usage:
+                sessions.add_usage(
+                    thread,
+                    last_usage.get("input_tokens", 0),
+                    last_usage.get("output_tokens", 0),
+                )
             yield _sse({"type": "done"})
 
         return StreamingResponse(stream(), media_type="text/event-stream")
