@@ -110,12 +110,15 @@ def make_app(
 ) -> FastAPI:
     """앱 팩토리. 테스트는 model/k8s 스텁을 주입하고, 실행은 설정만으로 조립한다."""
     settings = settings or load_settings()
-    assert_safe_kubeconfig(settings.kubeconfig)  # fail-fast: 마스터/prod 컨텍스트 차단
+    context = settings.kube_context or None
+    assert_safe_kubeconfig(
+        settings.kubeconfig, context=context, allow_real=settings.allow_real_cluster
+    )
 
     if k8s is None:
         from .tools.k8s_read import ReadOnlyK8sClient
 
-        k8s = ReadOnlyK8sClient(settings.kubeconfig)
+        k8s = ReadOnlyK8sClient(settings.kubeconfig, context=context)
     audit = audit or AuditLogger(settings.logs_dir)
     if checkpointer is None:
         settings.checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
@@ -182,6 +185,8 @@ def make_app(
                 "reasoning_effort": default_effort,
                 "reasoning_options": list(ALLOWED_REASONING_EFFORTS) if graphs else [],
                 "kubeconfig": bool(settings.kubeconfig),
+                "context": context or "(current)",
+                "real_cluster": settings.allow_real_cluster,
             }
         )
 

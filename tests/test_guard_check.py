@@ -97,9 +97,41 @@ def test_config_rejects_prod_context(tmp_path):
         assert_safe_kubeconfig(str(cfg))
 
 
-def test_config_rejects_master_kubeconfig_path(tmp_path):
+def test_config_rejects_master_kubeconfig_without_optin(tmp_path):
+    """실 kubeconfig는 명시적 opt-in 없이는 여전히 거부된다 (기본 안전)."""
     fake_home = tmp_path / "home"
     (fake_home / ".kube").mkdir(parents=True)
     master = write_kubeconfig(fake_home / ".kube" / "config", "https://10.0.0.5:6443", "dev-master")
     with pytest.raises(UnsafeKubeconfigError):
         assert_safe_kubeconfig(str(master), home=fake_home)
+
+
+def test_config_allows_real_cluster_readonly_with_optin_and_context(tmp_path):
+    """opt-in + 컨텍스트 지정 시 실 dev 클러스터 read-only 조사가 허용된다 (2계층 모델)."""
+    fake_home = tmp_path / "home"
+    (fake_home / ".kube").mkdir(parents=True)
+    master = write_kubeconfig(
+        fake_home / ".kube" / "config", "https://10.0.0.5:6443", "aws-seoul-clouddev"
+    )
+    # 정상: dev 컨텍스트 + opt-in
+    assert_safe_kubeconfig(
+        str(master), context="aws-seoul-clouddev", allow_real=True, home=fake_home
+    )
+    # 컨텍스트 미지정이면 current-context로 폴백 (여기선 dev라 통과)
+    assert_safe_kubeconfig(str(master), allow_real=True, home=fake_home)
+    # 없는 컨텍스트는 거부
+    with pytest.raises(UnsafeKubeconfigError):
+        assert_safe_kubeconfig(str(master), context="nope", allow_real=True, home=fake_home)
+
+
+def test_config_blocks_prod_context_even_with_optin(tmp_path):
+    """opt-in이어도 prod 마커 컨텍스트는 어떤 경우에도 거부된다 (fail-fast)."""
+    fake_home = tmp_path / "home"
+    (fake_home / ".kube").mkdir(parents=True)
+    master = write_kubeconfig(
+        fake_home / ".kube" / "config", "https://10.0.0.5:6443", "aws-seoul-cloudprod"
+    )
+    with pytest.raises(UnsafeKubeconfigError):
+        assert_safe_kubeconfig(
+            str(master), context="aws-seoul-cloudprod", allow_real=True, home=fake_home
+        )

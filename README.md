@@ -162,6 +162,31 @@ verb/resource/namespace, 검증 통과 여부, 결과 요약 길이, 소요 시�
 
 ---
 
+## 4.5 2계층 접근 모델 — 실 dev 조사 + 샌드박스 실증
+
+실사용 워크플로: **실 dev 클러스터를 read-only로 디버그 → 로컬 kind 복제본에서 자유롭게
+실증·수정**. 두 계층의 권한이 다르다.
+
+| 계층 | 대상 | 권한 | 근거 |
+|---|---|---|---|
+| 실 클러스터 | `aws-seoul-clouddev`, `azure-uae-gsp` 등 | **read-only** (조사·디버그) | 4중 방어선이 admin 자격증명이어도 GET만 발생 |
+| 로컬 샌드박스 | kind 복제본 | **read-write** (테스트·수정) | 일회용 가상환경 — 실 클러스터 무관 |
+
+실 클러스터 조사는 명시적 opt-in을 요구한다 (실수 방지):
+
+```bash
+AGENT_ALLOW_REAL_CLUSTER=1 KUBECONFIG=~/.kube/config KUBE_CONTEXT=aws-seoul-clouddev \
+  .venv/bin/python -m src.cli --context aws-seoul-clouddev "kube-system 문제 파드 찾아줘"
+```
+
+- **prod/production 마커 컨텍스트는 opt-in이어도 거부**된다 (fail-fast) — 실 프로덕션은 조회조차 안 함.
+- 실측 검증: 실 클러스터(v1.32.3, 네임스페이스 24개) 조사 시 전송된 HTTP 메서드가 **GET뿐**임을
+  전송 스파이로 확인했다 — read-only 보장이 실 클러스터에서도 성립한다.
+- 웹 헤더에 현재 대상(🌐 실 / 🧪 샌드박스 + 컨텍스트)이 표시된다.
+
+> 이 저장소의 read-only 에이전트는 실 클러스터를 **읽기만** 한다. 복제본을 kind에 만드는
+> 쓰기 작업은 별도 도구(operational script)의 몫이며, 이 에이전트의 실행 경로에 포함되지 않는다.
+
 ## 5. 마스터 크리덴셜 격리와 로컬 실증
 
 사용자의 `~/.kube/config`(dev 마스터 크리덴셜)는 이 저장소의 **어떤 스크립트·테스트·에이전트 실행

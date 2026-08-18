@@ -19,3 +19,7 @@ type: workload
 - 2026-08-18T07:42:39+00:00: phase=Running, waiting=CrashLoopBackOff, restarts=11
 - 2026-08-18T07:42:39+00:00: 로그 조회함 (58자, tail=100)
 - 2026-08-18T07:42:39+00:00: 로그 조회함 (58자, tail=100)
+- 2026-08-18T08:02:36+00:00: phase=Running, waiting=CrashLoopBackOff, restarts=15
+- 2026-08-18T08:02:45+00:00: phase=Running, waiting=CrashLoopBackOff, restarts=15
+- 2026-08-18T08:02:45+00:00: 로그 조회함 (58자, tail=100)
+- 2026-08-18T08:02:45+00:00: 로그 조회함 (58자, tail=100)

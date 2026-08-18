@@ -36,9 +36,13 @@ _REVISION_ANNOTATION = "deployment.kubernetes.io/revision"
 class ReadOnlyK8sClient:
     """읽기 전용 K8s facade. 모든 요청은 GuardedApiClient(GET-only)를 통과한다."""
 
-    def __init__(self, kubeconfig_path: str):
+    def __init__(self, kubeconfig_path: str, context: str | None = None):
         cfg = Configuration()
-        k8s_loader.load_kube_config(config_file=kubeconfig_path, client_configuration=cfg)
+        k8s_loader.load_kube_config(
+            config_file=kubeconfig_path,
+            context=context or None,
+            client_configuration=cfg,
+        )
         self._api = GuardedApiClient(configuration=cfg)
         core = CoreV1Api(self._api)
         apps = AppsV1Api(self._api)
