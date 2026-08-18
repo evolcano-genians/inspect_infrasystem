@@ -1,6 +1,13 @@
-# inspect-k8s — LangGraph 기반 Dev Kubernetes Read-Only Inspection 에이전트
+# inspect-k8s — Codex LLM 기반 Dev K8s 디버그·개발 하네스
 
-자연어 질의로 dev Kubernetes 클러스터를 **읽기 전용으로만** 조사(inspect)하는 LangGraph 에이전트.
+**목적**: LLM(Codex OAuth, OpenAI 모델)을 이용해 dev Kubernetes(aws/azure)를 read-only로
+디버그하고, nexus-shell과 shell app 들을 실수 없이 개발하기 위한 하네스 시스템.
+전문 에이전트들(inspector/sre-triage/log-collector/code-correlator 등)이 클러스터 상태·로그·
+소스코드를 교차 조사하고, 로컬 kind 샌드박스에서 실증한다.
+
+**보안 아키텍처 (회사 정책 반영)**: 이 Mac은 k8s 접근 전용이고, 앱 소스코드와 GitHub
+자격증명은 원격 개발서버(SSH)에만 둔다. 클러스터에는 GET만 나가고(4중 방어선),
+소스는 read-only 열람만, git push는 서버 릴레이 경유(`scripts/push-github.sh`).
 
 > **⚠️ 최상위 원칙**: 이 에이전트와 이를 만드는 어떤 스크립트도, 에이전트가 자격증명으로 접근하는
 > K8s 클러스터에 어떠한 리소스도 생성·수정·삭제하지 않는다. RBAC·ServiceAccount·토큰 발급을
@@ -198,6 +205,9 @@ AGENT_ALLOW_REAL_CLUSTER=1 KUBECONFIG=~/.kube/config KUBE_CONTEXT=aws-seoul-clou
   .venv/bin/python -m src.cli --context aws-seoul-clouddev "kube-system 문제 파드 찾아줘"
 ```
 
+- **멀티 클러스터**: `~/.kube/config`의 안전한(비-prod) 컨텍스트가 웹 헤더 드롭다운에 노출되어
+  턴 단위로 전환할 수 있다 — `aws-seoul-clouddev` ↔ `azure-uae-gsp` (두 dev는 구성이 거의 동일,
+  Azure에도 nexus-shell 스택 배포됨을 실측 확인).
 - **prod/production 마커 컨텍스트는 opt-in이어도 거부**된다 (fail-fast) — 실 프로덕션은 조회조차 안 함.
 - 실측 검증: 실 클러스터(v1.32.3, 네임스페이스 24개) 조사 시 전송된 HTTP 메서드가 **GET뿐**임을
   전송 스파이로 확인했다 — read-only 보장이 실 클러스터에서도 성립한다.

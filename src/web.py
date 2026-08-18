@@ -56,6 +56,7 @@ class ChatRequest(BaseModel):
     thread_id: str = Field(default="", max_length=64)
     agent: str = Field(default="", max_length=64)
     reasoning: str = Field(default="", max_length=16)  # low|medium|high (codex-oauth 전용)
+    context: str = Field(default="", max_length=64)    # 조사 대상 클러스터 컨텍스트
 
 
 _WIKI_PATH_RE = re.compile(r"^[A-Za-z0-9._\-/]{1,200}\.md$")
@@ -116,10 +117,24 @@ def make_app(
         settings.kubeconfig, context=context, allow_real=settings.allow_real_cluster
     )
 
+    # 멀티 클러스터: 실 kubeconfig의 안전한 컨텍스트별로 read-only 클라이언트를 만든다.
+    # (prod 마커 컨텍스트는 assert_safe_kubeconfig가 거부 → 목록에서 제외)
+    available_contexts: list[str] = []
     if k8s is None:
+        from .config import resolve_contexts
         from .tools.k8s_read import ReadOnlyK8sClient
 
         k8s = ReadOnlyK8sClient(settings.kubeconfig, context=context)
+        if settings.allow_real_cluster:
+            names, _current = resolve_contexts(settings.kubeconfig)
+            for name in names:
+                try:
+                    assert_safe_kubeconfig(
+                        settings.kubeconfig, context=name, allow_real=True
+                    )
+                except Exception:
+                    continue  # prod 등 금지 컨텍스트는 노출하지 않는다
+                available_contexts.append(name)
     audit = audit or AuditLogger(settings.logs_dir)
     if checkpointer is None:
         settings.checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
@@ -140,27 +155,51 @@ def make_app(
         except SourceAccessError as exc:
             print(f"경고: 소스 열람 비활성화 — {exc}")
 
-    def _graph_for(m):
+    # 컨텍스트별 도구 세트 (클러스터 전환용). 기본 컨텍스트는 위에서 만든 k8s/tools 재사용.
+    tools_by_context: dict[str, list] = {}
+    if available_contexts:
+        from .tools.k8s_read import ReadOnlyK8sClient as _ROClient
+
+        for name in available_contexts:
+            if name == (context or ""):
+                tools_by_context[name] = tools
+                continue
+            try:
+                tools_by_context[name] = make_tools(
+                    _ROClient(settings.kubeconfig, context=name), audit
+                )
+            except Exception as exc:  # 접근 불가 컨텍스트는 조용히 제외
+                print(f"경고: 컨텍스트 '{name}' 도구 생성 실패 — {type(exc).__name__}")
+
+    def _graph_for(m, ctx_tools=None):
         return build_graph(
             model=m, k8s=k8s, wiki_dir=settings.wiki_dir, audit=audit,
-            checkpointer=checkpointer, tools=tools, agents_dir=settings.agents_dir,
-            extra_tools=extra_tools,
+            checkpointer=checkpointer, tools=ctx_tools or tools,
+            agents_dir=settings.agents_dir, extra_tools=extra_tools,
         )
 
     # 추론 모드 선택: codex-oauth이고 모델이 주입되지 않았을 때만 단계별 그래프를 조립한다.
     # (허용 단계는 정책상 low|medium|high — fast/ultra는 여기서부터 존재하지 않는다.)
     graphs: dict = {}
+    # 컨텍스트별 그래프 (기본 모델 기준) — 클러스터 전환 시 사용
+    graphs_by_context: dict[str, object] = {}
     if model is None and settings.model_provider == "codex-oauth":
         models = {eff: make_codex_model(settings.codex_model, eff) for eff in ALLOWED_REASONING_EFFORTS}
         graphs = {eff: _graph_for(m) for eff, m in models.items()}
         default_effort = settings.codex_reasoning_effort
         graph = graphs[default_effort]
         reflect_model = models[default_effort]
+        for name, ctx_tools in tools_by_context.items():
+            graphs_by_context[name] = (
+                graph if ctx_tools is tools else _graph_for(models[default_effort], ctx_tools)
+            )
     else:
         model = model or make_model(settings)
         default_effort = ""
         graph = _graph_for(model)
         reflect_model = model
+        for name, ctx_tools in tools_by_context.items():
+            graphs_by_context[name] = graph if ctx_tools is tools else _graph_for(model, ctx_tools)
     sessions = SessionStore(settings.checkpoint_db.parent / "sessions.sqlite")
     agents = load_agents(settings.agents_dir)
 
@@ -199,7 +238,9 @@ def make_app(
                 "reasoning_options": list(ALLOWED_REASONING_EFFORTS) if graphs else [],
                 "kubeconfig": bool(settings.kubeconfig),
                 "context": context or "(current)",
+                "context_options": available_contexts,
                 "real_cluster": settings.allow_real_cluster,
+                "source_host": bool(settings.source_ssh_host),
             }
         )
 
@@ -483,6 +524,19 @@ def make_app(
         else:
             effort = ""
             selected_graph = graph
+        # 클러스터(컨텍스트) 선택 — 지정 없으면 서버 기본 컨텍스트
+        target_ctx = (req.context or "").strip()
+        if target_ctx:
+            if target_ctx not in graphs_by_context:
+                return StreamingResponse(
+                    iter([_sse({
+                        "type": "error",
+                        "message": f"컨텍스트 '{target_ctx}' 사용 불가 — 가능: {available_contexts}",
+                    })]),
+                    media_type="text/event-stream",
+                )
+            if target_ctx != (context or ""):
+                selected_graph = graphs_by_context[target_ctx]
         sessions.touch(thread, title_candidate=question, agent=agent.name)
 
         def stream():
@@ -494,7 +548,10 @@ def make_app(
                 "agent_name": agent.name,
             }
             config = {"configurable": {"thread_id": thread}, "recursion_limit": 60}
-            yield _sse({"type": "start", "thread_id": thread, "reasoning": effort})
+            yield _sse({
+                "type": "start", "thread_id": thread, "reasoning": effort,
+                "context": target_ctx or context or "",
+            })
             last_usage: dict = {}
             try:
                 with invoke_lock:

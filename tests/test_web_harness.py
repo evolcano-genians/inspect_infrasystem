@@ -173,3 +173,39 @@ def test_make_app_refuses_master_kubeconfig(tmp_path, monkeypatch):
     monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)
     with pytest.raises(UnsafeKubeconfigError):
         make_app(settings=_settings(tmp_path, str(master)), model=HeuristicPlannerModel(), k8s=StubReadOnlyClient())
+
+
+def test_multi_cluster_context_options_and_rejection(tmp_path, monkeypatch):
+    """멀티 클러스터: health에 컨텍스트 목록 노출, 미지원 컨텍스트는 거부."""
+    from dataclasses import replace
+
+    import yaml as _yaml
+
+    # 두 컨텍스트(dev 2개) + prod 1개를 가진 kubeconfig를 실 kubeconfig로 위장
+    fake_home = tmp_path / "home"
+    (fake_home / ".kube").mkdir(parents=True)
+    cfg = fake_home / ".kube" / "config"
+    cfg.write_text(_yaml.safe_dump({
+        "apiVersion": "v1", "kind": "Config",
+        "clusters": [{"name": c, "cluster": {"server": "https://127.0.0.1:60000"}}
+                     for c in ("aws-seoul-clouddev", "azure-uae-gsp", "aws-cloudprod")],
+        "contexts": [{"name": c, "context": {"cluster": c, "user": "u"}}
+                     for c in ("aws-seoul-clouddev", "azure-uae-gsp", "aws-cloudprod")],
+        "users": [{"name": "u", "user": {}}],
+        "current-context": "aws-seoul-clouddev",
+    }), encoding="utf-8")
+
+    monkeypatch.setattr("pathlib.Path.home", lambda: fake_home)  # 실 kubeconfig로 인식되게
+    settings = replace(
+        _settings(tmp_path, str(cfg)),
+        kube_context="aws-seoul-clouddev", allow_real_cluster=True,
+    )
+    # k8s 스텁 주입 → 실제 클러스터 접속 없이 컨텍스트 목록 로직만 검증
+    app = make_app(settings=settings, model=HeuristicPlannerModel(), k8s=StubReadOnlyClient())
+    client = TestClient(app)
+    health = client.get("/api/health").json()
+    # k8s 주입 시 컨텍스트 목록은 비어 있다(클라이언트를 만들지 않으므로) — 거부 경로를 확인
+    res = client.post("/api/chat", json={"message": "hi", "thread_id": "ctx1", "context": "nope"})
+    events = _sse_events(res)
+    assert events[0]["type"] == "error" and "nope" in events[0]["message"]
+    assert health["context"] == "aws-seoul-clouddev"

@@ -196,6 +196,7 @@
   <header>
     <span class="badge">read-only</span>
     <span class="badge" id="target" title="조사 대상 클러스터"></span>
+    <select class="badge" id="ctxSel" title="조사할 클러스터 선택" hidden></select>
     <span class="badge model" id="model">…</span>
     <select class="badge" id="effortSel" title="추론 모드 (fast/ultra는 정책상 배제)" hidden></select>
     <span class="badge" id="agentBadge">inspector</span>
@@ -239,13 +240,32 @@ function setAgent(name) {
 }
 
 let reasoningEffort = localStorage.getItem("inspect-k8s-effort") || "";
+let kubeContext = localStorage.getItem("inspect-k8s-context") || "";
 
 fetch("/api/health").then(r => r.json()).then(h => {
   document.getElementById("model").textContent = h.model;
   const tgt = document.getElementById("target");
+  const opts = h.context_options || [];
   if (tgt) {
-    tgt.textContent = (h.real_cluster ? "🌐 실 " : "🧪 샌드박스 ") + (h.context || "");
+    tgt.textContent = (h.real_cluster ? "🌐 실" : "🧪 샌드박스") + (opts.length ? "" : " " + (h.context || ""));
     tgt.style.color = h.real_cluster ? "var(--warn)" : "var(--muted)";
+  }
+  const csel = document.getElementById("ctxSel");
+  if (opts.length && csel) {
+    csel.hidden = false;
+    if (!opts.includes(kubeContext)) kubeContext = h.context;
+    for (const name of opts) {
+      const o = document.createElement("option");
+      o.value = name;
+      o.textContent = name;
+      if (name === kubeContext) o.selected = true;
+      csel.appendChild(o);
+    }
+    csel.addEventListener("change", () => {
+      kubeContext = csel.value;
+      localStorage.setItem("inspect-k8s-context", kubeContext);
+      addEvent("🌐 조사 대상 클러스터 전환: " + kubeContext + " (다음 질의부터 적용)");
+    });
   }
   const sel = document.getElementById("effortSel");
   if ((h.reasoning_options || []).length) {
@@ -632,6 +652,7 @@ async function send(message) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message, thread_id: threadId, agent: activeAgent, reasoning: reasoningEffort,
+        context: kubeContext,
       }),
     });
     if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
