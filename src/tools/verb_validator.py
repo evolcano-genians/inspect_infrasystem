@@ -61,6 +61,8 @@ _INT_ARGS: dict[str, tuple[int, int]] = {
     "lines": (1, 2000),         # 소스 파일 읽을 줄 수
     "max_results": (1, 500),    # 소스 검색 결과 상한
     "limit": (1, 100),          # git log 개수
+    "max_rows": (1, 100_000),   # trino 조회 행 상한
+    "timeout": (1, 1800),       # sandbox_bash 실행 타임아웃(초)
 }
 _BOOL_ARGS = frozenset({"previous"})
 # 소스 조회(source_reader) 전용 인자 — SourceHost 내부에서 재검증·shlex 인용된다.
@@ -68,6 +70,22 @@ _SOURCE_PATH_ARGS = frozenset({"path"})
 _SOURCE_FREE_ARGS = frozenset({"pattern", "glob", "filename"})
 _SOURCE_PATH_RE = re.compile(r"^[A-Za-z0-9._/\-~]{1,300}$")
 _SOURCE_FREE_RE = re.compile(r"^[^\n'\"`\\]{0,300}$")
+
+# ── 확장 도구(trino/shell_http/sandbox) 인자 ──────────────────────────────
+# 원칙: 여기서는 구조적 검증(타입·길이·형식)만 한다. 실제 심층 방어선은 각 도구 내부:
+#   trino  → assert_readonly_sql (SELECT/SHOW/DESCRIBE만), _ident (식별자 인젝션 차단)
+#   sandbox→ BashSandbox Docker 격리 + _is_sandbox_target (루프백/사설/.test만)
+#   shell  → Keycloak 로그인 후 GET-only + 호스트 화이트리스트
+# 따라서 fail-closed 대상에서 빼되, 셸/제어문자·과길이만 결정론적으로 배제한다.
+_TRINO_IDENT_ARGS = frozenset({"catalog", "schema", "table"})
+_TRINO_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")  # trino_reader._IDENT_RE 와 동일
+_ENVNAME_ARGS = frozenset({"env"})              # shell_http 환경 키 (SHELL_<NAME>_*)
+_ENVNAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
+_TARGET_ARGS = frozenset({"target"})            # strix 대상 — _is_sandbox_target 이 실검증
+_TARGET_RE = re.compile(r"^[A-Za-z0-9._:/\-~]{1,300}$")
+_ENUM_ARGS: dict[str, frozenset[str]] = {"mode": frozenset({"", "quick", "standard", "deep"})}
+# 자유 텍스트 인자 → 길이 상한만. 실검증은 도구 내부(SQL 파서·샌드박스 격리)가 수행.
+_FREETEXT_ARGS: dict[str, int] = {"sql": 20_000, "command": 10_000, "instruction": 2_000}
 
 
 @dataclass(frozen=True)
@@ -143,6 +161,29 @@ def _validate_arg(key: str, value: object) -> str | None:
     if key in _BOOL_ARGS:
         if not isinstance(value, bool):
             return f"인자 '{key}' 값 {value!r} 은 불리언이어야 합니다"
+        return None
+    if key in _TRINO_IDENT_ARGS:
+        if not isinstance(value, str) or not _TRINO_IDENT_RE.match(value):
+            return f"인자 '{key}' 값 {value!r} 이 유효한 Trino 식별자가 아닙니다"
+        return None
+    if key in _ENVNAME_ARGS:
+        if not isinstance(value, str) or not _ENVNAME_RE.match(value):
+            return f"인자 '{key}' 값 {value!r} 이 유효한 환경 키가 아닙니다"
+        return None
+    if key in _TARGET_ARGS:
+        if not isinstance(value, str) or not _TARGET_RE.match(value):
+            return f"인자 '{key}' 값 {value!r} 이 유효한 대상(host/URL)이 아닙니다"
+        return None
+    if key in _ENUM_ARGS:
+        if value not in _ENUM_ARGS[key]:
+            return f"인자 '{key}' 값 {value!r} 은 {sorted(_ENUM_ARGS[key])} 중 하나여야 합니다"
+        return None
+    if key in _FREETEXT_ARGS:
+        cap = _FREETEXT_ARGS[key]
+        if value in ("", None):
+            return None  # instruction 등 선택적 자유 텍스트
+        if not isinstance(value, str) or len(value) > cap:
+            return f"인자 '{key}' 는 {cap}자 이하의 문자열이어야 합니다"
         return None
     return f"알 수 없는 인자 '{key}' (fail-closed 거부)"
 

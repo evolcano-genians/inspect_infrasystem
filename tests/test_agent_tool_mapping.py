@@ -130,3 +130,43 @@ def test_executor_safety_unchanged_with_mapping(tmp_path):
     from langchain_core.messages import ToolMessage
     assert any(isinstance(m, ToolMessage) and "[거부됨" in str(m.content) for m in result["messages"])
     assert stub.calls == []
+
+
+# 확장 도구별 대표 인자 — executor의 verb_validator 게이트를 통과해야 실제로 동작한다.
+# (이 매핑이 비면 data-analyst/platform-inspector/security-auditor의 시그니처 도구가
+#  그래프 경로에서 조용히 전부 거부된다 — 회귀 방지용 고정 케이스.)
+_REPRESENTATIVE_ARGS: dict[str, dict] = {
+    "trino_query": {"sql": "SELECT 1", "max_rows": 200},
+    "trino_catalogs": {},
+    "trino_schemas": {"catalog": "delta"},
+    "trino_tables": {"catalog": "delta", "schema": "bronze"},
+    "trino_describe": {"catalog": "delta", "schema": "bronze", "table": "events"},
+    "shell_list_envs": {},
+    "shell_http_get": {"env": "vm", "path": "/api/auth/me"},
+    "sandbox_bash": {"command": "echo hi", "timeout": 30},
+    "sandbox_pentest_strix": {"target": "127.0.0.1", "instruction": "scan", "mode": "quick"},
+}
+
+
+def test_extended_tools_pass_executor_validation():
+    """확장 도구가 대표 인자로 verb_validator(executor 게이트)를 통과하는지 — 실동작 보장."""
+    # 모든 도구를 조립해 레지스트리에 등록시킨다 (make_*_tools가 register_tool 호출)
+    _all_tool_names()
+    from src.tools import verb_validator as vv
+
+    for name, args in _REPRESENTATIVE_ARGS.items():
+        verdict = vv.validate_tool_call(name, args)
+        assert verdict.allowed, f"확장 도구 '{name}' 이 executor 검증에서 거부됨: {verdict.reason}"
+
+
+def test_extended_tool_args_still_reject_injection():
+    """확장 인자 허용이 방어선을 뚫지 않는지 — 위험 인자는 여전히 거부."""
+    _all_tool_names()
+    from src.tools import verb_validator as vv
+
+    # SQL 인젝션형 식별자, 미등록 인자, 셸 메타문자 대상은 거부돼야 한다
+    assert not vv.validate_tool_call("trino_describe",
+                                     {"catalog": "a;DROP", "schema": "b", "table": "c"}).allowed
+    assert not vv.validate_tool_call("sandbox_bash", {"command": "x", "evil": "1"}).allowed
+    assert not vv.validate_tool_call("sandbox_pentest_strix", {"target": "a`b`"}).allowed
+    assert not vv.validate_tool_call("shell_http_get", {"env": "v m"}).allowed  # 공백 불가
