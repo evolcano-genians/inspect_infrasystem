@@ -90,6 +90,62 @@
   select.badge { border: 1px solid var(--line); cursor: pointer; outline: none; }
   #log { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
   .msg { max-width: 78%; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; word-break: break-word; }
+  /* ---- 마크다운 렌더링 ---- */
+  .agent .mdP { white-space: pre-wrap; margin: 0 0 6px; }
+  .agent .mdP:last-child { margin-bottom: 0; }
+  .agent .mdH { font-weight: 700; margin: 10px 0 6px; white-space: normal; }
+  .agent .mdH1 { font-size: 17px; } .agent .mdH2 { font-size: 15.5px; }
+  .agent .mdH3 { font-size: 14.5px; color: var(--accent); } .agent .mdH4 { font-size: 14px; }
+  .agent .mdList { margin: 4px 0 8px; padding-left: 22px; white-space: normal; }
+  .agent .mdList li { margin: 2px 0; }
+  .agent hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+  /* 표: 넓으면 자체 영역에서 가로 스크롤 (페이지 전체가 밀리지 않게) */
+  .tableWrap { overflow-x: auto; margin: 8px 0 10px; border: 1px solid var(--line); border-radius: 8px; }
+  table.mdTable { border-collapse: collapse; width: 100%; font-size: 13px; white-space: normal; }
+  table.mdTable th, table.mdTable td {
+    border-bottom: 1px solid var(--line); border-right: 1px solid var(--line);
+    padding: 6px 10px; text-align: left; vertical-align: top;
+  }
+  table.mdTable th { background: var(--chip); font-weight: 600; position: sticky; top: 0; }
+  table.mdTable tr:last-child td { border-bottom: 0; }
+  table.mdTable th:last-child, table.mdTable td:last-child { border-right: 0; }
+  table.mdTable tbody tr:hover { background: var(--chip); }
+  table.mdTable code { font-size: 12px; }
+  /* ---- 다이어그램 ---- */
+  .diagram { margin: 10px 0; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--chip); overflow: hidden; }
+  .diagramView { padding: 12px; overflow-x: auto; text-align: center; white-space: normal; }
+  .diagramView svg { max-width: 100%; height: auto; }
+  .diagramBar { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line);
+    flex-wrap: wrap; }
+  .diagramBar button {
+    font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  }
+  .diagramBar button:hover { border-color: var(--accent); color: var(--accent); }
+  .diagramWarn { padding: 6px 12px; font-size: 12px; color: var(--bad); }
+  /* ---- 진행 상태 표시 ---- */
+  .statusBar {
+    display: none; align-self: flex-start; align-items: center; gap: 8px;
+    font-size: 12.5px; color: var(--muted); padding: 7px 12px; border-radius: 10px;
+    background: var(--panel); border: 1px solid var(--line);
+  }
+  .statusBar.on { display: flex; }
+  .statusBar .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  .statusBar.done .dot { animation: none; background: var(--ok, #3fb950); }
+  @keyframes pulse { 0%, 100% { opacity: .35; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.15); } }
+  .statusBar .elapsed { font-variant-numeric: tabular-nums; opacity: .8; }
+  /* 컨텍스트 사용량 배지 */
+  header .ctxUse { display: flex; align-items: center; gap: 6px; }
+  header .ctxUse .bar {
+    width: 54px; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden;
+  }
+  header .ctxUse .fill { height: 100%; width: 0%; background: var(--accent); transition: width .3s; }
+  header .ctxUse .fill.warn { background: #d29922; }
+  header .ctxUse .fill.high { background: var(--bad); }
   .user { align-self: flex-end; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 4px; }
   .agent { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
   .agent pre, .agent code { background: var(--chip); border-radius: 6px; padding: 1px 5px; font-size: 13px; overflow-x: auto; }
@@ -99,6 +155,26 @@
     cursor: pointer; font-size: 13px; padding: 2px 8px; opacity: .6; }
   .feedback button:hover { opacity: 1; }
   .feedback button.fb-on { opacity: 1; border-color: var(--accent); background: var(--chip); }
+  .noteRow { display: flex; gap: 6px; margin-top: 6px; }
+  .noteRow input {
+    flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 4px 8px;
+    border-radius: 7px; border: 1px solid var(--accent); background: var(--bg); color: var(--ink);
+  }
+  .noteRow button {
+    font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  }
+  .metaRow { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  .metaRow input {
+    flex: 1; min-width: 140px; font: inherit; font-size: 13px; padding: 5px 9px;
+    border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  }
+  .metaRow button {
+    font: inherit; font-size: 12px; padding: 4px 12px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  }
+  .metaRow button.primary { border-color: var(--accent); color: var(--accent); }
+  .metaInfo { font-size: 12px; color: var(--muted); }
   .event {
     align-self: flex-start; font-size: 12.5px; color: var(--muted);
     background: var(--chip); border-radius: 10px; padding: 5px 10px;
@@ -216,6 +292,14 @@
     <span class="badge" id="agentBadge">inspector</span>
     <span class="badge" id="thread"></span>
     <span class="badge" id="sessTokens" title="현재 세션 누적 토큰 (in+out)"></span>
+    <span class="badge ctxUse" id="ctxUse" title="이 대화가 사용 중인 컨텍스트 윈도우" hidden>
+      <span>ctx</span>
+      <span class="bar"><span class="fill" id="ctxFill"></span></span>
+      <span id="ctxText">–</span>
+    </span>
+    <span class="spacer" style="flex:1"></span>
+    <button class="badge" id="metaBtn" type="button" style="cursor:pointer"
+            title="이 세션의 조사 지식을 Claude에 붙여넣을 프롬프트로 생성">🧠 메타프롬프트</button>
   </header>
 
   <div id="log"></div>
@@ -238,10 +322,38 @@ let threadId = localStorage.getItem("inspect-k8s-thread") || null;
 let activeAgent = "inspector";
 let agentDefs = [];
 let usageChip = null;   // 현재 턴의 토큰 사용량 표시 요소 (usage 이벤트마다 갱신)
+let currentStatus = null;  // 진행 중인 턴의 상태 표시 핸들
+// 컨텍스트 윈도우: 이번 턴 input_tokens = 모델에 실제로 들어간 대화+위키+도구결과 총량.
+// gpt-5 계열 400k 기준(모델이 바뀌면 /api/health의 model로 조정).
+let ctxWindow = 400000;
+let ctxUsed = 0;
 
 function fmtTk(n) {
   n = n || 0;
   return n >= 10000 ? (n / 1000).toFixed(1) + "k" : n.toLocaleString();
+}
+
+function updateContextUse(ev) {
+  // input_tokens가 곧 "이번 요청이 차지한 컨텍스트 크기"다. 턴이 진행될수록 커진다.
+  const used = ev.input_tokens || 0;
+  if (used > ctxUsed) ctxUsed = used;
+  const box = document.getElementById("ctxUse");
+  const fill = document.getElementById("ctxFill");
+  const text = document.getElementById("ctxText");
+  if (!box || !fill || !text) return;
+  box.hidden = false;
+  const pct = Math.min(100, (ctxUsed / ctxWindow) * 100);
+  fill.style.width = pct.toFixed(1) + "%";
+  fill.className = "fill" + (pct >= 80 ? " high" : pct >= 60 ? " warn" : "");
+  text.textContent = fmtTk(ctxUsed) + " / " + fmtTk(ctxWindow) + " (" + pct.toFixed(0) + "%)";
+  box.title = `이 대화가 사용 중인 컨텍스트 윈도우: ${ctxUsed.toLocaleString()} / ${ctxWindow.toLocaleString()} 토큰`
+    + (pct >= 80 ? " — 한계에 근접했습니다. 새 세션을 시작하면 초기화됩니다." : "");
+}
+
+function resetContextUse() {
+  ctxUsed = 0;
+  const box = document.getElementById("ctxUse");
+  if (box) box.hidden = true;
 }
 
 function setThreadBadge() {
@@ -321,24 +433,257 @@ function addToolResult(name, status, preview) {
   log.scrollTop = log.scrollHeight;
 }
 
+// ---------- 마크다운 렌더링 (표·제목·목록·강조) ----------
+// XSS 방지: 모든 텍스트는 textContent로만 넣는다(innerHTML 미사용).
+function renderInline(text, parent) {
+  // `코드`, **굵게**, *기울임* 순으로 안전하게 분해
+  text.split(/(`[^`]+`)/).forEach(seg => {
+    if (seg.startsWith("`") && seg.endsWith("`") && seg.length > 2) {
+      const code = document.createElement("code");
+      code.textContent = seg.slice(1, -1);
+      parent.appendChild(code);
+      return;
+    }
+    seg.split(/(\*\*[^*]+\*\*)/).forEach(s2 => {
+      if (s2.startsWith("**") && s2.endsWith("**") && s2.length > 4) {
+        const b = document.createElement("strong");
+        b.textContent = s2.slice(2, -2);
+        parent.appendChild(b);
+      } else if (s2) {
+        parent.appendChild(document.createTextNode(s2));
+      }
+    });
+  });
+}
+
+function splitRow(line) {
+  let s = line.trim();
+  if (s.startsWith("|")) s = s.slice(1);
+  if (s.endsWith("|")) s = s.slice(0, -1);
+  return s.split("|").map(c => c.trim());
+}
+
+const _isTableSep = ln => /^\s*\|?[\s:-]*-[-\s:|]*\|?\s*$/.test(ln) && ln.includes("-");
+const _isTableRow = ln => ln.trim().startsWith("|") && ln.trim().endsWith("|") && ln.includes("|");
+
+function renderMarkdownBlocks(text, parent) {
+  const lines = text.split("\n");
+  let i = 0;
+  let para = [];
+
+  const flushPara = () => {
+    if (!para.length) return;
+    const p = document.createElement("div");
+    p.className = "mdP";
+    renderInline(para.join("\n"), p);
+    parent.appendChild(p);
+    para = [];
+  };
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // 표: 헤더행 + 구분행 + 본문행들
+    if (_isTableRow(line) && i + 1 < lines.length && _isTableSep(lines[i + 1])) {
+      flushPara();
+      const header = splitRow(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && _isTableRow(lines[i])) { rows.push(splitRow(lines[i])); i++; }
+      const wrap = document.createElement("div");
+      wrap.className = "tableWrap";
+      const table = document.createElement("table");
+      table.className = "mdTable";
+      const thead = document.createElement("thead");
+      const htr = document.createElement("tr");
+      header.forEach(h => { const th = document.createElement("th"); renderInline(h, th); htr.appendChild(th); });
+      thead.appendChild(htr); table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      rows.forEach(r => {
+        const tr = document.createElement("tr");
+        for (let c = 0; c < header.length; c++) {
+          const td = document.createElement("td");
+          renderInline(r[c] !== undefined ? r[c] : "", td);
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody); wrap.appendChild(table); parent.appendChild(wrap);
+      continue;
+    }
+
+    // 제목 (#, ##, ###)
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) {
+      flushPara();
+      const tag = document.createElement("div");
+      tag.className = "mdH mdH" + h[1].length;
+      renderInline(h[2], tag);
+      parent.appendChild(tag);
+      i++; continue;
+    }
+
+    // 목록 (-, *, 1.) — 연속 항목을 한 블록으로
+    if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
+      flushPara();
+      const ordered = /^\s*\d+\./.test(line);
+      const list = document.createElement(ordered ? "ol" : "ul");
+      list.className = "mdList";
+      while (i < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[i])) {
+        const li = document.createElement("li");
+        renderInline(lines[i].replace(/^\s*([-*+]|\d+\.)\s+/, ""), li);
+        list.appendChild(li);
+        i++;
+      }
+      parent.appendChild(list);
+      continue;
+    }
+
+    // 구분선
+    if (/^\s*(---+|___+|\*\*\*+)\s*$/.test(line)) {
+      flushPara();
+      parent.appendChild(document.createElement("hr"));
+      i++; continue;
+    }
+
+    if (line.trim() === "") { flushPara(); i++; continue; }
+    para.push(line);
+    i++;
+  }
+  flushPara();
+}
+
+// ---------- 다이어그램(mermaid) 도식화 + 이미지 저장 ----------
+let mermaidReady = null;
+let diagramSeq = 0;
+
+function loadMermaid() {
+  // 로컬 번들(/vendor/mermaid.min.js) — 오프라인·CSP 환경에서도 동작
+  if (mermaidReady) return mermaidReady;
+  mermaidReady = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "/vendor/mermaid.min.js";
+    s.onload = () => {
+      try {
+        window.mermaid.initialize({
+          startOnLoad: false,
+          theme: "dark",
+          securityLevel: "strict",   // 다이어그램 텍스트는 신뢰 불가 데이터 — 스크립트 실행 차단
+          fontFamily: "inherit",
+        });
+        resolve(window.mermaid);
+      } catch (e) { reject(e); }
+    };
+    s.onerror = () => reject(new Error("mermaid 로드 실패"));
+    document.head.appendChild(s);
+  });
+  return mermaidReady;
+}
+
+function downloadBlob(blob, filename) {
+  // Electron/브라우저 공통: a[download] + object URL
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function svgToPng(svgEl, filename, scale) {
+  // SVG를 canvas에 그려 PNG로 저장 (외부 리소스 없이 직렬화 → data URL)
+  const clone = svgEl.cloneNode(true);
+  const bbox = svgEl.getBoundingClientRect();
+  const w = Math.max(1, Math.ceil(bbox.width || 800));
+  const h = Math.max(1, Math.ceil(bbox.height || 600));
+  clone.setAttribute("width", w); clone.setAttribute("height", h);
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  const svgText = new XMLSerializer().serializeToString(clone);
+  const img = new Image();
+  img.onload = () => {
+    const k = scale || 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = w * k; canvas.height = h * k;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = getComputedStyle(document.body).backgroundColor || "#0f1115";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+    ctx.drawImage(img, 0, 0);
+    canvas.toBlob(b => b && downloadBlob(b, filename), "image/png");
+  };
+  img.onerror = () => addEvent("⚠️ PNG 변환 실패 — SVG로 저장해 주세요");
+  img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgText);
+}
+
+function makeDiagram(code) {
+  const wrap = document.createElement("div");
+  wrap.className = "diagram";
+  const view = document.createElement("div");
+  view.className = "diagramView";
+  view.textContent = "다이어그램 렌더링 중…";
+  const bar = document.createElement("div");
+  bar.className = "diagramBar";
+  wrap.append(view, bar);
+
+  const id = "mmd-" + (++diagramSeq) + "-" + Date.now().toString(36);
+  const safeName = "diagram-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "");
+
+  loadMermaid()
+    .then(m => m.render(id, code))
+    .then(({ svg }) => {
+      view.innerHTML = svg;
+      const svgEl = view.querySelector("svg");
+      if (svgEl) { svgEl.style.maxWidth = "100%"; svgEl.style.height = "auto"; }
+      const mk = (label, title, fn) => {
+        const b = document.createElement("button");
+        b.textContent = label; b.title = title;
+        b.addEventListener("click", fn);
+        bar.appendChild(b);
+      };
+      mk("🖼 PNG 저장", "다이어그램을 PNG 이미지로 내려받기", () => {
+        if (svgEl) svgToPng(svgEl, safeName + ".png", 2);
+      });
+      mk("💾 SVG 저장", "벡터 SVG로 내려받기", () => {
+        if (!svgEl) return;
+        const s = new XMLSerializer().serializeToString(svgEl);
+        downloadBlob(new Blob([s], { type: "image/svg+xml;charset=utf-8" }), safeName + ".svg");
+      });
+      mk("📋 소스 복사", "mermaid 소스를 클립보드로", async () => {
+        try { await navigator.clipboard.writeText(code); addEvent("📋 mermaid 소스 복사됨"); }
+        catch { addEvent("⚠️ 클립보드 접근 불가"); }
+      });
+    })
+    .catch(err => {
+      // 렌더 실패 시 원본 소스를 그대로 보여준다(정보 손실 방지)
+      view.textContent = "";
+      const pre = document.createElement("pre");
+      pre.textContent = code;
+      view.appendChild(pre);
+      const warn = document.createElement("div");
+      warn.className = "diagramWarn";
+      warn.textContent = "⚠️ 다이어그램 렌더 실패 (" + (err && err.message ? err.message : "구문 오류") + ") — 원본 표시";
+      wrap.insertBefore(warn, bar);
+    });
+  return wrap;
+}
+
 function renderAgent(text, turnId) {
   const node = el("div", "msg agent");
   const parts = text.split(/```/);
   parts.forEach((part, i) => {
     if (i % 2 === 1) {
+      // ```mermaid 블록은 다이어그램으로 도식화 + 이미지 다운로드 제공
+      const langMatch = part.match(/^([a-z]*)\n/);
+      const lang = langMatch ? langMatch[1] : "";
+      const body = part.replace(/^[a-z]*\n/, "");
+      if (lang === "mermaid") {
+        node.appendChild(makeDiagram(body));
+        return;
+      }
       const pre = document.createElement("pre");
-      pre.textContent = part.replace(/^[a-z]*\n/, "");
+      pre.textContent = body;
       node.appendChild(pre);
     } else {
-      part.split(/(`[^`]+`)/).forEach(seg => {
-        if (seg.startsWith("`") && seg.endsWith("`")) {
-          const code = document.createElement("code");
-          code.textContent = seg.slice(1, -1);
-          node.appendChild(code);
-        } else if (seg) {
-          node.appendChild(document.createTextNode(seg));
-        }
-      });
+      renderMarkdownBlocks(part, node);
     }
   });
   if (turnId) {
@@ -347,16 +692,44 @@ function renderAgent(text, turnId) {
     for (const [label, rating, title] of [["👍", "good", "정확·유용"], ["👎", "bad", "부정확·개선 필요"], ["📝", "note", "메모 남기기"]]) {
       const b = document.createElement("button");
       b.textContent = label; b.title = title;
-      b.addEventListener("click", async () => {
-        let note = "";
-        if (rating === "note") { note = prompt("개선 메모 (이 답변에 대해):") || ""; if (!note) return; }
+      const submit = async (note) => {
         await fetch("/api/feedback", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ turn_id: turnId, rating, note }),
+          body: JSON.stringify({ turn_id: turnId, rating, note: note || "" }),
         });
         fb.querySelectorAll("button").forEach(x => x.classList.remove("fb-on"));
         b.classList.add("fb-on");
         addEvent("🧩 피드백 기록됨 (하네스 개선에 활용) — " + title);
+      };
+      b.addEventListener("click", async () => {
+        // Electron 렌더러는 window.prompt()를 지원하지 않는다 → 인라인 입력으로 처리
+        if (rating === "note") {
+          if (fb.querySelector(".noteRow")) return;
+          const row = document.createElement("div");
+          row.className = "noteRow";
+          const inp = document.createElement("input");
+          inp.type = "text";
+          inp.placeholder = "개선 메모 (이 답변에 대해) — Enter 저장, Esc 취소";
+          const ok = document.createElement("button");
+          ok.textContent = "저장";
+          const cancel = () => row.remove();
+          const save = async () => {
+            const v = inp.value.trim();
+            if (!v) { cancel(); return; }
+            row.remove();
+            await submit(v);
+          };
+          ok.addEventListener("click", save);
+          inp.addEventListener("keydown", e => {
+            if (e.key === "Enter") { e.preventDefault(); save(); }
+            if (e.key === "Escape") { e.preventDefault(); cancel(); }
+          });
+          row.append(inp, ok);
+          fb.parentElement.appendChild(row);
+          inp.focus();
+          return;
+        }
+        await submit("");
       });
       fb.appendChild(b);
     }
@@ -541,6 +914,60 @@ function openNewAgent() {
 document.getElementById("wikiBtn").addEventListener("click", openWiki);
 document.getElementById("newAgentBtn").addEventListener("click", openNewAgent);
 
+// ---------- 메타프롬프트: 조사 지식 → Claude 세션 인계 ----------
+async function openMetaprompt() {
+  overlay.hidden = false;
+  ovCtx = { kind: "metaprompt" };
+  ovTitle.textContent = "🧠 메타프롬프트 — Claude 세션으로 인계";
+  ovList.innerHTML = "";
+  ovText.value = "생성 중…";
+
+  ovStatus.textContent = "";
+  const row = document.createElement("div");
+  row.className = "metaRow";
+  const topic = document.createElement("input");
+  topic.placeholder = "주제로 좁히기 (예: nexus-lake, oauth2-proxy) — 비우면 전체";
+  const task = document.createElement("input");
+  task.placeholder = "Claude에게 시킬 작업 (선택)";
+  const gen = document.createElement("button");
+  gen.textContent = "재생성";
+  const copy = document.createElement("button");
+  copy.textContent = "📋 복사";
+  copy.className = "primary";
+  row.append(topic, task, gen, copy);
+  ovStatus.appendChild(row);
+  const info = document.createElement("div");
+  info.className = "metaInfo";
+  ovStatus.appendChild(info);
+
+  const build = async () => {
+    ovText.value = "생성 중…";
+    try {
+      const res = await fetch("/api/metaprompt", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: topic.value.trim(), task: task.value.trim() }),
+      });
+      const d = await res.json();
+      if (!res.ok) { ovText.value = ""; info.textContent = d.error || "생성 실패"; return; }
+      ovText.value = d.prompt;
+      info.textContent = `${d.chars.toLocaleString()}자 · 위키 ${d.sources.length}개 페이지 반영`
+        + (d.sources.length ? " (" + d.sources.slice(0, 4).join(", ") + (d.sources.length > 4 ? " …" : "") + ")" : "");
+    } catch (e) {
+      ovText.value = "";
+      info.textContent = "생성 실패: " + e.message;
+    }
+  };
+  gen.addEventListener("click", build);
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(ovText.value);
+      info.textContent = "📋 클립보드에 복사됨 — Claude 세션에 붙여넣으세요";
+    } catch { info.textContent = "클립보드 접근 불가 — 텍스트를 직접 선택해 복사하세요"; }
+  });
+  await build();
+}
+document.getElementById("metaBtn").addEventListener("click", openMetaprompt);
+
 document.getElementById("ovSave").addEventListener("click", async () => {
   if (!ovCtx) { ovStatusMsg("저장할 대상이 없습니다 — 항목을 먼저 선택하세요", true); return; }
   try {
@@ -654,6 +1081,7 @@ async function switchSession(id) {
   threadId = id;
   localStorage.setItem("inspect-k8s-thread", id);
   setThreadBadge();
+  resetContextUse();   // 세션마다 컨텍스트 윈도우는 독립
   await loadHistory();
   refreshSessions();
 }
@@ -664,6 +1092,7 @@ async function newSession(load = true) {
   threadId = data.thread_id;
   localStorage.setItem("inspect-k8s-thread", threadId);
   setThreadBadge();
+  resetContextUse();
   if (load) {
     log.innerHTML = "";
     addEvent("🆕 새 세션을 시작했습니다 — 대화 context는 이 세션에만 유지되고, 위키 장기 기억은 모든 세션이 공유합니다.");
@@ -675,10 +1104,40 @@ document.getElementById("newSession").addEventListener("click", () => newSession
 
 // ---------- 채팅 ----------
 
+// ---------- 진행 상태 표시 ----------
+// 사용자가 "지금 생각 중인지 / 도구를 쓰는 중인지 / 끝났는지"를 항상 볼 수 있게 한다.
+function makeStatus() {
+  const bar = el("div", "statusBar on");
+  const dot = document.createElement("span"); dot.className = "dot";
+  const label = document.createElement("span"); label.className = "label";
+  label.textContent = "생각하는 중…";
+  const elapsed = document.createElement("span"); elapsed.className = "elapsed";
+  bar.append(dot, label, elapsed);
+  const t0 = Date.now();
+  let toolCount = 0;
+  const timer = setInterval(() => {
+    elapsed.textContent = ((Date.now() - t0) / 1000).toFixed(1) + "초";
+  }, 100);
+  return {
+    node: bar,
+    set(text) { label.textContent = text; log.scrollTop = log.scrollHeight; },
+    tool(name) { toolCount++; label.textContent = `🛠 조사 중 — ${name} (도구 ${toolCount}회)`; },
+    finish(text) {
+      clearInterval(timer);
+      bar.classList.add("done");
+      const secs = ((Date.now() - t0) / 1000).toFixed(1);
+      label.textContent = text || "완료";
+      elapsed.textContent = secs + "초 · 도구 " + toolCount + "회";
+    },
+    stop() { clearInterval(timer); },
+  };
+}
+
 async function send(message) {
   if (!threadId) await newSession(false);
   el("div", "msg user", message);
-  const typing = el("div", "typing", "조사 중…");
+  const status = makeStatus();
+  currentStatus = status;
   sendBtn.disabled = true;
   usageChip = null;   // 턴마다 새 사용량 칩
   try {
@@ -708,8 +1167,11 @@ async function send(message) {
     }
   } catch (err) {
     addEvent("⛔ 연결 오류: " + err.message).classList.add("error");
+    status.finish("⛔ 중단됨");
   } finally {
-    typing.remove();
+    status.stop();
+    if (!status.node.classList.contains("done")) status.finish("✅ 완료");
+    currentStatus = null;
     sendBtn.disabled = false;
     input.focus();
     refreshSessions();
@@ -718,14 +1180,20 @@ async function send(message) {
 
 function handleEvent(ev) {
   switch (ev.type) {
+    case "start":
+      if (currentStatus) currentStatus.set("🧠 생각하는 중… (위키 참조 후 계획 수립)");
+      break;
     case "wiki":
       addEvent("📚 위키에서 과거 관찰 " + ev.chars + "자 로드");
+      if (currentStatus) currentStatus.set("🧠 계획 수립 중… (과거 관찰 반영)");
       break;
     case "tool_call":
       addEvent("▶ " + ev.name + " " + JSON.stringify(ev.args));
+      if (currentStatus) currentStatus.tool(ev.name);
       break;
     case "tool_result":
       addToolResult(ev.name, ev.status, ev.preview);
+      if (currentStatus) currentStatus.set("🧠 관찰 해석 중… (다음 단계 판단)");
       break;
     case "usage":
       if (!usageChip) usageChip = addEvent("");
@@ -734,9 +1202,12 @@ function handleEvent(ev) {
         " · out " + fmtTk(ev.output_tokens) +
         " · 합계 " + fmtTk(ev.total_tokens) +
         " (LLM 호출 " + (ev.llm_calls || 0) + "회)";
+      updateContextUse(ev);
       break;
     case "final":
+      if (currentStatus) currentStatus.set("✍️ 답변 작성 중…");
       renderAgent(ev.answer || "(답변 없음)", ev.turn_id);
+      if (currentStatus) currentStatus.finish("✅ 완료");
       break;
     case "evolution":
       if (ev.lesson) addEvent("🧬 자가 진화 — 교훈 학습: " + ev.lesson);

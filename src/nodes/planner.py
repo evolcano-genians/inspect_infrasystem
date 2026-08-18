@@ -64,6 +64,17 @@ SYSTEM_PROMPT = """당신은 dev Kubernetes 클러스터를 조사(inspect)하�
 - **shell app 예시**: nexus-lake(datalakehouse — Trino/Delta), lake-explorer/query/viewer 등.
   nexus-lake 데이터 분석은 data-analyst 에이전트(Trino read-only SQL)를 쓴다.
 - 조사 시 어느 환경(AWS/Azure/VM)인지 명확히 구분해 답하라 — 헤더의 대상 컨텍스트를 전제로 한다.
+
+## 두 클러스터 비교
+
+AWS와 Azure 두 클러스터의 상태를 대조해야 할 때(예: "AWS와 Azure의 배포가 일치하는지"),
+비교 도구가 있으면 활용하라:
+- k8s_list_contexts 로 비교 가능한 컨텍스트를 먼저 확인한다.
+- k8s_compare(resource, namespace) 로 동일 리소스를 두 클러스터에서 한 번에 읽어 by_context로
+  나란히 대조한다(deployments/statefulsets/services/pvcs/configmaps/pods 등). replica 수·이미지
+  태그·리소스 요청·PVC 용량/StorageClass 차이를 이 결과로 비교하라.
+- 클러스터마다 네임스페이스 이름이 다르면 k8s_read_at(context, resource, namespace)로 각각 읽는다.
+- 비교 도구가 없으면(단일 컨텍스트 세션) 그 사실을 밝히고, 두 클러스터 접근이 필요하다고 답하라.
 """
 
 

@@ -90,6 +90,21 @@ class AgentCreateRequest(BaseModel):
     content: str = Field(default="", max_length=MAX_AGENT_FILE_CHARS)
 
 
+class MetapromptRequest(BaseModel):
+    """Claude 세션으로 인계할 메타프롬프트 생성 요청."""
+
+    topic: str = Field(default="", max_length=200)        # 좁힐 주제(네임스페이스·앱 이름 등)
+    task: str = Field(default="", max_length=4000)        # Claude에게 시킬 작업
+    session_note: str = Field(default="", max_length=4000)  # 이번 세션 메모
+
+
+class DiagramRequest(BaseModel):
+    """LLM이 만든 mermaid 다이어그램 저장/내보내기 요청."""
+
+    code: str = Field(min_length=1, max_length=20_000)    # mermaid 소스
+    title: str = Field(default="diagram", max_length=80)
+
+
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
@@ -275,6 +290,18 @@ def make_app(
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(_STATIC / "chat.html", media_type="text/html")
+
+    @app.get("/vendor/{filename}", response_model=None)
+    def vendor_asset(filename: str):
+        """로컬 번들 라이브러리(mermaid 등) 서빙 — 오프라인/CSP 환경에서도 동작한다."""
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", filename):  # 경로 순회 차단
+            return JSONResponse({"error": "잘못된 파일명"}, status_code=400)
+        target = (_STATIC / "vendor" / filename).resolve()
+        vendor_root = (_STATIC / "vendor").resolve()
+        if not str(target).startswith(str(vendor_root)) or not target.is_file():
+            return JSONResponse({"error": "없는 파일"}, status_code=404)
+        media = "application/javascript" if target.suffix == ".js" else "text/plain"
+        return FileResponse(target, media_type=media)
 
     @app.get("/api/health")
     def health() -> JSONResponse:
@@ -519,6 +546,20 @@ def make_app(
         return JSONResponse(
             {"saved": True, "path": req.path, "redacted": redacted_content != req.content}
         )
+
+    # ---------- 메타프롬프트 (Claude 세션 인계) ----------
+    @app.post("/api/metaprompt")
+    def metaprompt(req: MetapromptRequest) -> JSONResponse:
+        """축적된 inspection 지식을 Claude 세션용 메타프롬프트로 합성한다."""
+        from .metaprompt import build_metaprompt
+
+        result = build_metaprompt(
+            settings.wiki_dir,
+            topic=req.topic,
+            task=req.task,
+            session_note=req.session_note,
+        )
+        return JSONResponse(result)
 
     # ---------- 세션별 작업 관리 ----------
     # 대화 context는 thread_id별 checkpointer가 보존한다. 아래 API는 그 위의
