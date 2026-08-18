@@ -149,13 +149,25 @@ function createWindow() {
     minHeight: 600,
     title: "inspect-k8s",
     backgroundColor: "#10161d",
-    titleBarStyle: "hiddenInset", // Claude Code 유사 — 상단바 최소화
-    trafficLightPosition: { x: 16, y: 18 },
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
+  });
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
+    mainWindow.focus();
+  });
+
+  // 렌더러 콘솔·크래시를 메인 프로세스 로그로 중계 (진단용)
+  mainWindow.webContents.on("console-message", (_e, level, message, line, sourceId) => {
+    process.stdout.write(`[renderer:${level}] ${message} (${sourceId}:${line})\n`);
+  });
+  mainWindow.webContents.on("render-process-gone", (_e, details) => {
+    process.stdout.write(`[renderer-gone] ${JSON.stringify(details)}\n`);
   });
 
   // 외부 링크는 기본 브라우저로
@@ -173,6 +185,25 @@ function createWindow() {
     .then(() => {
       serverReady = true;
       if (mainWindow) mainWindow.loadURL(BASE_URL);
+      if (process.env.INSPECT_DIAG) {
+        mainWindow.webContents.once("did-finish-load", () => {
+          setTimeout(() => mainWindow.webContents.executeJavaScript(`
+            (function(){
+              const before = document.querySelectorAll('#sessions .sess').length;
+              const btn = document.getElementById('newSession');
+              let fired = false;
+              btn.addEventListener('click', ()=>{fired=true}, {once:true});
+              btn.click();
+              const inp = document.getElementById('input');
+              inp.focus();
+              const focused = document.activeElement === inp;
+              return {newSessionExists: !!btn, clickFired: fired, inputFocusable: focused,
+                      hasSendBtn: !!document.getElementById('send'),
+                      composerListener: typeof document.getElementById('composer').onsubmit};
+            })()
+          `).then(r => process.stdout.write("[diag] "+JSON.stringify(r)+"\n")).catch(e=>process.stdout.write("[diag-err] "+e+"\n")), 2500);
+        });
+      }
     })
     .catch((err) => {
       const tail = serverStderr.join("").trim().split("\n").slice(-6).join("\n");
@@ -241,6 +272,19 @@ function buildMenu() {
     { role: "windowMenu" },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+// 단일 인스턴스 강제 — 중복 실행 시 기존 창을 앞으로.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
 }
 
 app.whenReady().then(async () => {
