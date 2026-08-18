@@ -130,11 +130,21 @@ def make_app(
         )
 
     tools = make_tools(k8s, audit)
+    # 소스 열람 도구 (SOURCE_SSH_HOST 설정 시) — SSH read-only, 명령 화이트리스트
+    extra_tools: list = []
+    if settings.source_ssh_host:
+        from .tools.source_reader import SourceAccessError, SourceHost, make_source_tools
+
+        try:
+            extra_tools = make_source_tools(SourceHost(settings.source_ssh_host), audit)
+        except SourceAccessError as exc:
+            print(f"경고: 소스 열람 비활성화 — {exc}")
 
     def _graph_for(m):
         return build_graph(
             model=m, k8s=k8s, wiki_dir=settings.wiki_dir, audit=audit,
             checkpointer=checkpointer, tools=tools, agents_dir=settings.agents_dir,
+            extra_tools=extra_tools,
         )
 
     # 추론 모드 선택: codex-oauth이고 모델이 주입되지 않았을 때만 단계별 그래프를 조립한다.
@@ -165,7 +175,7 @@ def make_app(
             "verb": tool_specs[t.name].verb if t.name in tool_specs else "",
             "resource": tool_specs[t.name].resource if t.name in tool_specs else "",
         }
-        for t in tools
+        for t in [*tools, *extra_tools]
     ]
     # 그래프 호출은 전역 락으로 직렬화한다 — 단일 사용자 로컬 도구이며,
     # 같은 thread_id 동시 호출과 sqlite 경합을 코드 레벨에서 차단한다.

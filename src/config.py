@@ -54,6 +54,7 @@ class Settings:
     agents_dir: Path
     kube_context: str = ""
     allow_real_cluster: bool = False
+    source_ssh_host: str = ""  # user@host — 소스 read-only 조회용 (SOURCE_SSH_HOST)
 
 
 def load_settings(root: Path | None = None) -> Settings:
@@ -70,6 +71,7 @@ def load_settings(root: Path | None = None) -> Settings:
         agents_dir=root / ".agents",
         kube_context=os.environ.get("KUBE_CONTEXT", ""),
         allow_real_cluster=_truthy(os.environ.get("AGENT_ALLOW_REAL_CLUSTER")),
+        source_ssh_host=os.environ.get("SOURCE_SSH_HOST", ""),
     )
 
 

@@ -146,8 +146,11 @@ def build_graph(
     interrupt_before: list[str] | None = None,
     tools: list | None = None,
     agents_dir=None,
+    extra_tools: list | None = None,
 ):
     tools = tools if tools is not None else make_tools(k8s, audit)
+    if extra_tools:
+        tools = [*tools, *extra_tools]
     from pathlib import Path as _Path
 
     agents_dir = _Path(agents_dir) if agents_dir else _Path(wiki_dir).parent / ".agents"

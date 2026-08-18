@@ -26,6 +26,7 @@ ALLOWED_VERBS: frozenset[str] = frozenset(
         "version",
         "cluster-info",
         "ping",
+        "source-read",  # SSH 개발 서버 소스 read-only 조회 (source_reader)
     }
 )
 
@@ -53,8 +54,17 @@ _SELECTOR_ARGS = frozenset({"label_selector", "field_selector"})
 _INT_ARGS: dict[str, tuple[int, int]] = {
     "tail_lines": (1, 5000),
     "since_seconds": (0, 7 * 24 * 3600),  # 로그 시간 창: 최대 7일 (0 = 미지정)
+    "start": (1, 10_000_000),   # 소스 파일 읽기 시작 줄
+    "lines": (1, 2000),         # 소스 파일 읽을 줄 수
+    "max_results": (1, 500),    # 소스 검색 결과 상한
+    "limit": (1, 100),          # git log 개수
 }
 _BOOL_ARGS = frozenset({"previous"})
+# 소스 조회(source_reader) 전용 인자 — SourceHost 내부에서 재검증·shlex 인용된다.
+_SOURCE_PATH_ARGS = frozenset({"path"})
+_SOURCE_FREE_ARGS = frozenset({"pattern", "glob", "filename"})
+_SOURCE_PATH_RE = re.compile(r"^[A-Za-z0-9._/\-~]{1,300}$")
+_SOURCE_FREE_RE = re.compile(r"^[^\n'\"`\\]{0,300}$")
 
 
 @dataclass(frozen=True)
@@ -105,6 +115,16 @@ def _validate_arg(key: str, value: object) -> str | None:
     if key in _CRD_ARGS:
         if not isinstance(value, str) or not _CRD_TOKEN_RE.match(value):
             return f"인자 '{key}' 값 {value!r} 이 유효한 CRD 좌표(group/version/plural)가 아닙니다"
+        return None
+    if key in _SOURCE_PATH_ARGS:
+        if not isinstance(value, str) or ".." in value or not _SOURCE_PATH_RE.match(value):
+            return f"인자 '{key}' 값 {value!r} 이 유효한 소스 경로가 아닙니다(.. 금지)"
+        return None
+    if key in _SOURCE_FREE_ARGS:
+        if value in ("", None):
+            return None
+        if not isinstance(value, str) or not _SOURCE_FREE_RE.match(value):
+            return f"인자 '{key}' 값 {value!r} 에 허용되지 않는 문자가 있습니다(셸 메타문자 금지)"
         return None
     if key in _SELECTOR_ARGS:
         if value in ("", None):
