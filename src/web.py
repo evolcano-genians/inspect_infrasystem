@@ -25,7 +25,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage
 from langgraph.errors import GraphRecursionError
 from pydantic import BaseModel, Field
 
@@ -588,6 +588,61 @@ def make_app(
         return JSONResponse(
             {"thread_id": thread_id, "turns": turns, "meta": meta.to_dict() if meta else None}
         )
+
+    @app.post("/api/sessions/{thread_id}/compact")
+    def compact_session(thread_id: str) -> JSONResponse:
+        """대화 이력을 요약으로 압축한다 (/compact) — 컨텍스트 윈도우 확보용.
+
+        기존 메시지를 LLM으로 요약해 한 쌍(Human 요약 요청 / AI 요약)으로 대체한다.
+        위키 장기 기억은 그대로이므로 조사 지식은 잃지 않는다.
+        """
+        if not _THREAD_ID_RE.match(thread_id):
+            return JSONResponse({"error": "thread_id 형식이 올바르지 않습니다"}, status_code=400)
+        config = {"configurable": {"thread_id": thread_id}}
+        with invoke_lock:
+            state = graph.get_state(config)
+            messages = list((state.values or {}).get("messages") or [])
+            if len(messages) < 4:
+                return JSONResponse({"compacted": False, "note": "압축할 만큼 긴 대화가 아닙니다"})
+
+            # 요약 대상: 사람이 읽을 수 있는 대화 흐름(도구 호출 원문은 제외해 비용을 낮춘다)
+            transcript: list[str] = []
+            for msg in messages:
+                if isinstance(msg, HumanMessage):
+                    transcript.append("[사용자] " + str(msg.content)[:2000])
+                elif isinstance(msg, AIMessage) and str(msg.content).strip():
+                    transcript.append("[에이전트] " + str(msg.content)[:3000])
+            joined = "\n\n".join(transcript)[-40_000:]
+
+            try:
+                summary_msg = reflect_model.invoke([
+                    SystemMessage(content=(
+                        "다음은 dev k8s 조사 세션의 대화 기록이다. 이후 대화가 이어질 수 있도록 "
+                        "**압축 요약**을 작성하라. 반드시 보존할 것: 조사 대상(네임스페이스·워크로드), "
+                        "확인된 사실과 수치, 내린 결론, 미해결 질문, 사용자의 선호·제약. "
+                        "불필요한 서술은 버리되 사실은 왜곡하지 마라. 한국어 불릿으로 간결하게."
+                    )),
+                    HumanMessage(content=joined),
+                ])
+                summary = str(getattr(summary_msg, "content", "") or "").strip()
+            except Exception as exc:
+                return JSONResponse(
+                    {"error": f"요약 실패: {type(exc).__name__}: {exc}"}, status_code=502
+                )
+            if not summary:
+                return JSONResponse({"error": "요약이 비어 있습니다"}, status_code=502)
+
+            # 기존 메시지를 모두 제거하고 요약 한 쌍으로 대체한다.
+            removals = [RemoveMessage(id=m.id) for m in messages if getattr(m, "id", None)]
+            graph.update_state(config, {"messages": [
+                *removals,
+                HumanMessage(content="(이전 대화 압축 요약)"),
+                AIMessage(content=summary),
+            ]})
+        return JSONResponse({
+            "compacted": True, "summary": summary,
+            "before_messages": len(messages), "after_messages": 2,
+        })
 
     @app.delete("/api/sessions/{thread_id}")
     def remove_session(thread_id: str) -> JSONResponse:

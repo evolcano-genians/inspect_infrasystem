@@ -187,8 +187,19 @@
   .typing { align-self: flex-start; color: var(--muted); font-size: 13px; padding-left: 4px; }
   form {
     display: flex; gap: 10px; padding: 12px 18px 16px; background: var(--panel);
-    border-top: 1px solid var(--line);
+    border-top: 1px solid var(--line); position: relative;
   }
+  /* 슬래시 명령 자동완성 — 입력창 위에 떠서 표시 */
+  #slashHint {
+    position: absolute; bottom: calc(100% - 6px); left: 18px; right: 18px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.35); overflow: hidden; z-index: 20; max-height: 240px;
+    overflow-y: auto;
+  }
+  .slashRow { display: flex; gap: 10px; padding: 7px 12px; cursor: pointer; font-size: 13px; }
+  .slashRow:hover { background: var(--chip); }
+  .slashRow b { color: var(--accent); min-width: 84px; }
+  .slashRow span { color: var(--muted); }
   textarea {
     flex: 1; resize: none; border: 1px solid var(--line); border-radius: 12px;
     background: var(--bg); color: var(--ink); padding: 10px 12px; font: inherit;
@@ -305,7 +316,8 @@
   <div id="log"></div>
 
   <form id="composer">
-    <textarea id="input" rows="1" placeholder="예: default 네임스페이스에서 CrashLoopBackOff 상태인 파드 찾아줘  (Enter 전송 · Shift+Enter 줄바꿈)"></textarea>
+    <div id="slashHint" hidden></div>
+    <textarea id="input" rows="1" placeholder="예: default 네임스페이스에서 CrashLoopBackOff 파드 찾아줘  ·  / 입력 시 명령 (Enter 전송 · Shift+Enter 줄바꿈)"></textarea>
     <button id="send" type="submit">전송</button>
   </form>
 </main>
@@ -1235,16 +1247,124 @@ document.getElementById("reflectBtn").addEventListener("click", async () => {
   }
 });
 
-form.addEventListener("submit", e => {
+// ---------- 슬래시 커맨드 (/compact, /clear, /help …) ----------
+const SLASH_COMMANDS = [
+  { cmd: "/compact", desc: "대화를 요약으로 압축해 컨텍스트 확보 (위키 기억은 유지)" },
+  { cmd: "/clear", desc: "새 세션 시작 — 대화 컨텍스트 초기화" },
+  { cmd: "/context", desc: "현재 컨텍스트 윈도우 사용량 보기" },
+  { cmd: "/agents", desc: "사용 가능한 에이전트 목록" },
+  { cmd: "/tools", desc: "사용 가능한 도구 목록" },
+  { cmd: "/wiki", desc: "위키(장기 기억) 열기" },
+  { cmd: "/meta", desc: "메타프롬프트 생성 — Claude 세션으로 인계" },
+  { cmd: "/learn", desc: "이번 세션에서 교훈 학습(자가 진화)" },
+  { cmd: "/help", desc: "사용 가능한 명령 보기" },
+];
+
+async function runSlash(raw) {
+  const [cmd] = raw.trim().split(/\s+/);
+  switch (cmd) {
+    case "/help":
+      addEvent("⌘ 사용 가능한 명령:\n" + SLASH_COMMANDS.map(c => `  ${c.cmd} — ${c.desc}`).join("\n"));
+      return true;
+    case "/clear":
+      await newSession();
+      return true;
+    case "/context": {
+      const pct = ((ctxUsed / ctxWindow) * 100).toFixed(1);
+      addEvent(`📊 컨텍스트 윈도우: ${ctxUsed.toLocaleString()} / ${ctxWindow.toLocaleString()} 토큰 (${pct}%)`
+        + (ctxUsed === 0 ? " — 아직 이번 세션에서 질의하지 않았습니다" : ""));
+      return true;
+    }
+    case "/agents":
+      addEvent("🤖 에이전트: " + agentDefs.map(a => a.name).join(", ") + "  (사이드바에서 선택)");
+      return true;
+    case "/tools":
+      document.getElementById("toolsBox").open = true;
+      addEvent("🛠 사용 가능한 도구 목록을 사이드바에 펼쳤습니다.");
+      return true;
+    case "/wiki":
+      openWiki();
+      return true;
+    case "/meta":
+      openMetaprompt();
+      return true;
+    case "/learn":
+      document.getElementById("reflectBtn").click();
+      return true;
+    case "/compact": {
+      if (!threadId) { addEvent("압축할 세션이 없습니다"); return true; }
+      const waiting = addEvent("🗜 대화를 요약으로 압축하는 중…");
+      try {
+        const res = await fetch("/api/sessions/" + threadId + "/compact", { method: "POST" });
+        const d = await res.json();
+        waiting.remove();
+        if (!res.ok) { addEvent("⛔ 압축 실패: " + (d.error || res.status)).classList.add("error"); return true; }
+        if (!d.compacted) { addEvent("ℹ️ " + (d.note || "압축하지 않았습니다")); return true; }
+        addEvent(`🗜 압축 완료 — 메시지 ${d.before_messages}개 → 2개 (위키 장기 기억은 유지)`);
+        renderAgent("**압축 요약**\n\n" + d.summary);
+        resetContextUse();
+      } catch (err) {
+        waiting.remove();
+        addEvent("⛔ 압축 실패: " + err.message).classList.add("error");
+      }
+      return true;
+    }
+  }
+  if (cmd.startsWith("/")) {
+    addEvent("알 수 없는 명령: " + cmd + " — /help 로 목록을 보세요");
+    return true;
+  }
+  return false;
+}
+
+form.addEventListener("submit", async e => {
   e.preventDefault();
   const message = input.value.trim();
   if (!message || sendBtn.disabled) return;
   input.value = "";
+  if (message.startsWith("/")) {
+    el("div", "msg user", message);
+    const handled = await runSlash(message);
+    if (handled) { input.focus(); return; }
+  }
   send(message);
 });
+// 슬래시 명령 자동완성 힌트
+const slashHint = document.getElementById("slashHint");
+function refreshSlashHint() {
+  const v = input.value;
+  if (!v.startsWith("/") || v.includes(" ")) { slashHint.hidden = true; return; }
+  const matches = SLASH_COMMANDS.filter(c => c.cmd.startsWith(v));
+  if (!matches.length) { slashHint.hidden = true; return; }
+  slashHint.innerHTML = "";
+  matches.forEach(c => {
+    const row = document.createElement("div");
+    row.className = "slashRow";
+    const name = document.createElement("b"); name.textContent = c.cmd;
+    const desc = document.createElement("span"); desc.textContent = c.desc;
+    row.append(name, desc);
+    row.addEventListener("mousedown", ev => {   // click 전에 발생 → blur 방지
+      ev.preventDefault();
+      input.value = c.cmd;
+      slashHint.hidden = true;
+      form.requestSubmit();
+    });
+    slashHint.appendChild(row);
+  });
+  slashHint.hidden = false;
+}
+input.addEventListener("input", refreshSlashHint);
+input.addEventListener("blur", () => setTimeout(() => { slashHint.hidden = true; }, 150));
+
 input.addEventListener("keydown", e => {
+  if (e.key === "Tab" && !slashHint.hidden) {   // Tab 자동완성
+    const first = slashHint.querySelector(".slashRow b");
+    if (first) { e.preventDefault(); input.value = first.textContent; refreshSlashHint(); return; }
+  }
+  if (e.key === "Escape") { slashHint.hidden = true; return; }
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
+    slashHint.hidden = true;
     form.requestSubmit();
   }
 });

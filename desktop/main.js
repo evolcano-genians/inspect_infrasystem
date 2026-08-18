@@ -295,7 +295,14 @@ app.whenReady().then(async () => {
   createWindow();
   updateTimer = setInterval(() => runAutoUpdate(false), UPDATE_INTERVAL_MS);
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length > 0) return;
+    // macOS: 창을 닫아도 앱은 살아 있다. 이때 백엔드가 죽어 있으면(창 전부 닫힘 시 정리됨)
+    // 다시 띄워야 Dock 재열기가 정상 동작한다 — 없으면 스플래시에서 30초 대기 후 실패한다.
+    if (!serverProc) {
+      startServer();
+      if (!updateTimer) updateTimer = setInterval(() => runAutoUpdate(false), UPDATE_INTERVAL_MS);
+    }
+    createWindow();
   });
 });
 
