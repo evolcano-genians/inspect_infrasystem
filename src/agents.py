@@ -34,9 +34,11 @@ class AgentDef:
     description: str
     instructions: str
     source: str  # "builtin" 또는 파일명
+    tools: tuple[str, ...] = ()  # 빈 튜플 = 전체 도구. 지정 시 플래너가 해당 서브셋만 바인딩
 
     def to_dict(self, include_instructions: bool = False) -> dict:
         data = asdict(self)
+        data["tools"] = list(self.tools)
         if not include_instructions:
             data.pop("instructions")
         return data
@@ -53,10 +55,15 @@ def load_agents(agents_dir: Path) -> dict[str, AgentDef]:
             name = str(frontmatter.get("name") or path.stem).strip()
             if not name:
                 continue
+            raw_tools = frontmatter.get("tools") or []
+            tools = tuple(
+                str(t).strip() for t in raw_tools if isinstance(t, (str, int)) and str(t).strip()
+            ) if isinstance(raw_tools, list) else ()
             agents[name] = AgentDef(
                 name=name,
                 description=str(frontmatter.get("description") or "").strip(),
                 instructions=body.strip(),
                 source=path.name,
+                tools=tools,
             )
     return agents

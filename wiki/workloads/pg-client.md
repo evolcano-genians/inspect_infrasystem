@@ -16,3 +16,4 @@ type: workload
 - 2026-08-18T09:08:11+00:00: phase=Running, restarts=4
 - 2026-08-18T09:21:32+00:00: phase=Running, restarts=4
 - 2026-08-18T09:21:32+00:00: 리소스 사용량 — pg-client: cpu=0 mem=1224Ki
+- 2026-08-18T22:04:05+00:00: phase=Running, restarts=4

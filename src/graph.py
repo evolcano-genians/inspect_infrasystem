@@ -47,6 +47,7 @@ class InspectorState(TypedDict, total=False):
     final_answer: str
     agent_instructions: str  # 선택된 에이전트 정의(.agents/*.md)의 추가 시스템 지시
     agent_name: str  # 선택된 에이전트 이름 (교훈 파일 매칭용)
+    agent_tools: list  # 에이전트별 도구 서브셋 (빈 리스트 = 전체 — 플래너 바인딩용)
     lessons: str  # 축적된 교훈 (wiki/lessons/<agent>.md 최근 항목 — 플래너에 주입)
     last_lesson: str  # 이번 run에서 새로 배운 교훈 (reflector 산출)
     last_proposal: str  # 이번 run에서 생성된 스킬 개선 제안 파일명

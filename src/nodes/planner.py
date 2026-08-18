@@ -52,9 +52,15 @@ SYSTEM_PROMPT = """당신은 dev Kubernetes 클러스터를 조사(inspect)하�
 
 
 def make_planner_node(model: BaseChatModel, tools: list):
-    bound = model.bind_tools(tools)
+    bound_all = model.bind_tools(tools)
+    tools_by_name = {t.name: t for t in tools}
 
     def planner(state: dict) -> dict:
+        # 에이전트별 도구 매핑: agent_tools 지정 시 그 서브셋만 LLM에 노출한다.
+        # (실행기의 verb 검증·전송 가드는 불변 — 이 필터는 하네스 조준용이다.)
+        wanted = state.get("agent_tools") or []
+        subset = [tools_by_name[n] for n in wanted if n in tools_by_name]
+        bound = model.bind_tools(subset) if subset else bound_all
         wiki_context = state.get("wiki_context") or "(관련 위키 페이지 없음)"
         # 에이전트 정의(.agents/*.md)의 추가 지시 — 프롬프트만 바꿀 뿐 도구·권한은 불변
         agent_extra = (state.get("agent_instructions") or "").strip()

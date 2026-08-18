@@ -16,3 +16,5 @@ type: workload
 - 2026-08-18T09:08:11+00:00: phase=Running
 - 2026-08-18T09:21:32+00:00: phase=Running
 - 2026-08-18T09:21:32+00:00: 리소스 사용량 — shell: cpu=0 mem=3380Ki
+- 2026-08-18T22:04:05+00:00: phase=Running
+- 2026-08-18T22:04:14+00:00: phase=Running

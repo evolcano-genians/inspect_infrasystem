@@ -230,6 +230,7 @@
 - [2026-08-18-dev-debug-1](sessions/2026-08-18-dev-debug-1.md) 2026-08-18
 - [2026-08-18-effort-low-1](sessions/2026-08-18-effort-low-1.md) 2026-08-18
 - [2026-08-18-logcol-1](sessions/2026-08-18-logcol-1.md) 2026-08-18
+- [2026-08-18-map-net-1](sessions/2026-08-18-map-net-1.md) 2026-08-18
 - [2026-08-18-triage-1](sessions/2026-08-18-triage-1.md) 2026-08-18
 - [2026-08-18-usage-live-1](sessions/2026-08-18-usage-live-1.md) 2026-08-18
 - [2026-08-18-web-23a9d9ca](sessions/2026-08-18-web-23a9d9ca.md) 2026-08-18

@@ -194,6 +194,7 @@ def _write_session_page(wiki_dir: Path, state: dict, final_answer: str) -> None:
 
 
 def _rebuild_index(wiki_dir: Path) -> None:
+    Path(wiki_dir).mkdir(parents=True, exist_ok=True)
     lines = ["# 위키 인덱스", ""]
     for section in ("namespaces", "workloads", "patterns", "sessions"):
         directory = wiki_dir / section

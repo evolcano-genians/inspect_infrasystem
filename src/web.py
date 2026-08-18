@@ -546,6 +546,7 @@ def make_app(
                 "messages": [HumanMessage(question)],
                 "agent_instructions": agent.instructions,
                 "agent_name": agent.name,
+                "agent_tools": list(agent.tools),
             }
             config = {"configurable": {"thread_id": thread}, "recursion_limit": 60}
             yield _sse({
