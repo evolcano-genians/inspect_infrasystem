@@ -50,7 +50,10 @@ _CRD_TOKEN_RE = re.compile(r"^[a-z0-9]([-a-z0-9.]{0,63}[a-z0-9])?$")
 _NAME_ARGS = frozenset({"namespace", "name", "container"})
 _CRD_ARGS = frozenset({"group", "version", "plural"})
 _SELECTOR_ARGS = frozenset({"label_selector", "field_selector"})
-_INT_ARGS: dict[str, tuple[int, int]] = {"tail_lines": (1, 5000)}
+_INT_ARGS: dict[str, tuple[int, int]] = {
+    "tail_lines": (1, 5000),
+    "since_seconds": (0, 7 * 24 * 3600),  # 로그 시간 창: 최대 7일 (0 = 미지정)
+}
 _BOOL_ARGS = frozenset({"previous"})
 
 

@@ -107,7 +107,8 @@ class StubReadOnlyClient:
         self.calls.append(("get_pod", namespace, name))
         return dict(self._pods[0], name=name)
 
-    def get_pod_logs(self, namespace, name, container="", tail_lines=200, previous=False):
+    def get_pod_logs(self, namespace, name, container="", tail_lines=200, previous=False,
+                     since_seconds=0):
         self.calls.append(("get_pod_logs", namespace, name))
         return self._logs
 

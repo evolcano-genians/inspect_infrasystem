@@ -189,3 +189,33 @@ def test_session_lifecycle_and_per_session_context(tmp_path):
     remaining = {s["thread_id"] for s in client.get("/api/sessions").json()["sessions"]}
     assert "sess-b" not in remaining
     assert client.get("/api/sessions/sess-b/history").json()["turns"] == []
+
+
+def test_log_collector_agent_definition_loads():
+    """log-collector 에이전트가 프로젝트 .agents/ 에서 로드된다."""
+    from pathlib import Path
+
+    agents = load_agents(Path(__file__).resolve().parent.parent / ".agents")
+    lc = agents.get("log-collector")
+    assert lc is not None
+    assert "로그" in lc.description
+    for marker in ("previous=True", "since_seconds", "loki", "이벤트 교차"):
+        assert marker in lc.instructions, f"log-collector 지시문에 '{marker}' 누락"
+
+
+def test_since_seconds_arg_validation():
+    from src.tools import verb_validator
+    from src.tools.k8s_read import make_tools
+    from tests.conftest import StubReadOnlyClient
+
+    make_tools(StubReadOnlyClient())
+    ok = verb_validator.validate_tool_call(
+        "k8s_get_pod_logs",
+        {"namespace": "nexus-shell", "name": "loki-0", "since_seconds": 3600},
+    )
+    assert ok.allowed
+    bad = verb_validator.validate_tool_call(
+        "k8s_get_pod_logs",
+        {"namespace": "nexus-shell", "name": "loki-0", "since_seconds": 10**9},
+    )
+    assert not bad.allowed
