@@ -19,6 +19,7 @@
 - [2026-08-18-codex-e2e-1](sessions/2026-08-18-codex-e2e-1.md) 2026-08-18
 - [2026-08-18-codex-e2e-2](sessions/2026-08-18-codex-e2e-2.md) 2026-08-18
 - [2026-08-18-demo-1](sessions/2026-08-18-demo-1.md) 2026-08-18
+- [2026-08-18-effort-low-1](sessions/2026-08-18-effort-low-1.md) 2026-08-18
 - [2026-08-18-triage-1](sessions/2026-08-18-triage-1.md) 2026-08-18
 - [2026-08-18-usage-live-1](sessions/2026-08-18-usage-live-1.md) 2026-08-18
 - [2026-08-18-web-codex-1](sessions/2026-08-18-web-codex-1.md) 2026-08-18

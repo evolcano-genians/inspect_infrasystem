@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from src.agents import load_agents
-from src.llm import ScriptedChatModel
+from src.llm import HeuristicPlannerModel, ScriptedChatModel
 from src.nodes.planner import make_planner_node
 from tests.conftest import StubReadOnlyClient
 from tests.test_web_harness import _client, _fake_kubeconfig, _settings, _sse_events
@@ -116,6 +116,41 @@ def test_codex_reasoning_effort_policy():
     assert model.reasoning_effort == "medium"
     for allowed in ("low", "high"):
         assert make_codex_model("gpt-5.6-sol", allowed).reasoning_effort == allowed
+
+
+def test_reasoning_mode_selection_api(tmp_path):
+    """codex-oauth에서는 low/medium/high 선택 가능, 금지값은 네트워크 이전에 거부."""
+    from dataclasses import replace
+
+    from fastapi.testclient import TestClient
+
+    from src.web import make_app
+
+    settings = replace(_settings(tmp_path, _fake_kubeconfig(tmp_path)), model_provider="codex-oauth")
+    app = make_app(settings=settings, k8s=StubReadOnlyClient())  # model 미주입 → 단계별 그래프
+    client = TestClient(app)
+
+    health = client.get("/api/health").json()
+    assert health["reasoning_options"] == ["low", "medium", "high"]
+    assert health["reasoning_effort"] == "medium"
+
+    res = client.post("/api/chat", json={"message": "hi", "thread_id": "r1", "reasoning": "xhigh"})
+    events = _sse_events(res)
+    assert events[0]["type"] == "error" and "xhigh" in events[0]["message"]
+    res2 = client.post("/api/chat", json={"message": "hi", "thread_id": "r1", "reasoning": "minimal"})
+    assert _sse_events(res2)[0]["type"] == "error"
+
+
+def test_reasoning_field_ignored_for_non_codex_provider(tmp_path):
+    client = _client_with_agents(tmp_path, HeuristicPlannerModel())
+    res = client.post(
+        "/api/chat",
+        json={"message": "default 파드 봐줘", "thread_id": "r2", "reasoning": "high"},
+    )
+    events = _sse_events(res)
+    start = next(e for e in events if e["type"] == "start")
+    assert start["reasoning"] == ""  # codex-oauth가 아니므로 무시
+    assert any(e["type"] == "final" for e in events)
 
 
 def test_session_lifecycle_and_per_session_context(tmp_path):

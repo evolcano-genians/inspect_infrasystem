@@ -79,9 +79,11 @@ ChatGPT Plus/Pro 구독의 Codex OAuth 세션을 재사용한다. OpenAI API 키
 - **모델명**: 계정/플랜별 지원 모델이 다르다. 어댑터 기본값 `gpt-5.2-codex`는 이 계정에서
   HTTP 400으로 거부되어, codex CLI와 동일한 **`gpt-5.6-sol`** 을 기본값으로 쓴다
   (`CODEX_MODEL`로 변경 가능 — `~/.codex/config.toml`의 `model` 값과 맞추면 안전).
-- **추론 단계 정책**: `CODEX_REASONING_EFFORT`(기본 `medium`)는 `low|medium|high`만 허용한다.
-  fast 모드(minimal/none)와 ultra(xhigh)는 코드가 요청 생성 전에 거부한다 — codex CLI의
-  `xhigh` 설정과 무관하게 이 에이전트는 항상 중간 수준 추론으로 동작한다.
+- **추론 단계 정책 + UI 선택**: `CODEX_REASONING_EFFORT`(기본 `medium`)는 `low|medium|high`만
+  허용한다. fast 모드(minimal/none)와 ultra(xhigh)는 코드가 요청 생성 전에 거부한다 —
+  codex CLI의 `xhigh` 설정과 무관하게 이 에이전트는 fast/ultra를 절대 쓰지 않는다.
+  웹 헤더의 드롭다운에서 턴 단위로 low/medium/high를 선택할 수 있고(서버는 세 단계별 그래프를
+  미리 조립해 전환), 선택은 브라우저에 기억된다.
 - **백엔드 호환 보정**: 신형 모델에서 백엔드가 종료 이벤트(`response.completed`)의 `output`을
   비워 보내 어댑터 v1.0.0이 본문·tool call을 유실하는 문제를 발견 →
   `src/llm.py::make_codex_model`이 스트림의 `response.output_item.done` 아이템을 누적해

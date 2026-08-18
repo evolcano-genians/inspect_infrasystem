@@ -31,9 +31,14 @@ from pydantic import BaseModel, Field
 
 from .agents import load_agents
 from .audit import AuditLogger
-from .config import Settings, assert_safe_kubeconfig, load_settings
+from .config import (
+    ALLOWED_REASONING_EFFORTS,
+    Settings,
+    assert_safe_kubeconfig,
+    load_settings,
+)
 from .graph import build_graph
-from .llm import make_model
+from .llm import make_codex_model, make_model
 from .nodes.wiki_common import parse_page
 from .nodes.wiki_writer import redact_text
 from .sessions import SessionStore
@@ -49,6 +54,7 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
     thread_id: str = Field(default="", max_length=64)
     agent: str = Field(default="", max_length=64)
+    reasoning: str = Field(default="", max_length=16)  # low|medium|high (codex-oauth 전용)
 
 
 _WIKI_PATH_RE = re.compile(r"^[A-Za-z0-9._\-/]{1,200}\.md$")
@@ -110,7 +116,6 @@ def make_app(
         from .tools.k8s_read import ReadOnlyK8sClient
 
         k8s = ReadOnlyK8sClient(settings.kubeconfig)
-    model = model or make_model(settings)
     audit = audit or AuditLogger(settings.logs_dir)
     if checkpointer is None:
         settings.checkpoint_db.parent.mkdir(parents=True, exist_ok=True)
@@ -121,10 +126,25 @@ def make_app(
         )
 
     tools = make_tools(k8s, audit)
-    graph = build_graph(
-        model=model, k8s=k8s, wiki_dir=settings.wiki_dir, audit=audit,
-        checkpointer=checkpointer, tools=tools,
-    )
+
+    def _graph_for(m):
+        return build_graph(
+            model=m, k8s=k8s, wiki_dir=settings.wiki_dir, audit=audit,
+            checkpointer=checkpointer, tools=tools,
+        )
+
+    # 추론 모드 선택: codex-oauth이고 모델이 주입되지 않았을 때만 단계별 그래프를 조립한다.
+    # (허용 단계는 정책상 low|medium|high — fast/ultra는 여기서부터 존재하지 않는다.)
+    graphs: dict = {}
+    if model is None and settings.model_provider == "codex-oauth":
+        for eff in ALLOWED_REASONING_EFFORTS:
+            graphs[eff] = _graph_for(make_codex_model(settings.codex_model, eff))
+        default_effort = settings.codex_reasoning_effort
+        graph = graphs[default_effort]
+    else:
+        model = model or make_model(settings)
+        default_effort = ""
+        graph = _graph_for(model)
     sessions = SessionStore(settings.checkpoint_db.parent / "sessions.sqlite")
     agents = load_agents(settings.agents_dir)
 
@@ -159,8 +179,8 @@ def make_app(
                 "model_provider": settings.model_provider,
                 "model": settings.codex_model if settings.model_provider == "codex-oauth"
                 else settings.model_provider,
-                "reasoning_effort": settings.codex_reasoning_effort
-                if settings.model_provider == "codex-oauth" else "",
+                "reasoning_effort": default_effort,
+                "reasoning_options": list(ALLOWED_REASONING_EFFORTS) if graphs else [],
                 "kubeconfig": bool(settings.kubeconfig),
             }
         )
@@ -362,6 +382,23 @@ def make_app(
                 iter([_sse({"type": "error", "message": f"에이전트 '{req.agent}' 없음"})]),
                 media_type="text/event-stream",
             )
+        # 추론 모드 선택 (codex-oauth 전용). 금지값(minimal/xhigh 등)은 graphs에 없어 거부된다.
+        effort = (req.reasoning or "").strip().lower()
+        if graphs:
+            effort = effort or default_effort
+            selected_graph = graphs.get(effort)
+            if selected_graph is None:
+                return StreamingResponse(
+                    iter([_sse({
+                        "type": "error",
+                        "message": f"추론 모드 '{effort}' 미지원 — 허용: {list(graphs)} "
+                                   "(fast/ultra는 정책상 배제)",
+                    })]),
+                    media_type="text/event-stream",
+                )
+        else:
+            effort = ""
+            selected_graph = graph
         sessions.touch(thread, title_candidate=question, agent=agent.name)
 
         def stream():
@@ -372,11 +409,11 @@ def make_app(
                 "agent_instructions": agent.instructions,
             }
             config = {"configurable": {"thread_id": thread}, "recursion_limit": 60}
-            yield _sse({"type": "start", "thread_id": thread})
+            yield _sse({"type": "start", "thread_id": thread, "reasoning": effort})
             last_usage: dict = {}
             try:
                 with invoke_lock:
-                    for update in graph.stream(payload, config=config, stream_mode="updates"):
+                    for update in selected_graph.stream(payload, config=config, stream_mode="updates"):
                         for node, out in update.items():
                             if not isinstance(out, dict):
                                 continue
