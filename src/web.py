@@ -34,6 +34,8 @@ from .audit import AuditLogger
 from .config import Settings, assert_safe_kubeconfig, load_settings
 from .graph import build_graph
 from .llm import make_model
+from .nodes.wiki_common import parse_page
+from .nodes.wiki_writer import redact_text
 from .sessions import SessionStore
 from .tools import verb_validator
 from .tools.k8s_read import make_tools
@@ -47,6 +49,37 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
     thread_id: str = Field(default="", max_length=64)
     agent: str = Field(default="", max_length=64)
+
+
+_WIKI_PATH_RE = re.compile(r"^[A-Za-z0-9._\-/]{1,200}\.md$")
+MAX_WIKI_PAGE_CHARS = 200_000
+
+
+class WikiSaveRequest(BaseModel):
+    path: str = Field(min_length=4, max_length=200)
+    content: str = Field(max_length=MAX_WIKI_PAGE_CHARS)
+
+
+_AGENT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
+MAX_AGENT_FILE_CHARS = 20_000
+
+_AGENT_TEMPLATE = """---
+name: {name}
+description: (한 줄 설명)
+---
+
+(이 본문이 플래너 시스템 프롬프트에 추가되는 지시문/스킬이다.
+도구·권한은 바뀌지 않는다 — 조사 방식과 답변 스타일만 특화된다.)
+"""
+
+
+class AgentSaveRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=MAX_AGENT_FILE_CHARS)
+
+
+class AgentCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=41)
+    content: str = Field(default="", max_length=MAX_AGENT_FILE_CHARS)
 
 
 def _sse(payload: dict) -> str:
@@ -94,6 +127,10 @@ def make_app(
     )
     sessions = SessionStore(settings.checkpoint_db.parent / "sessions.sqlite")
     agents = load_agents(settings.agents_dir)
+
+    def _reload_agents() -> None:
+        agents.clear()
+        agents.update(load_agents(settings.agents_dir))
     tool_specs = verb_validator.registered_tools()
     tool_listing = [
         {
@@ -122,6 +159,8 @@ def make_app(
                 "model_provider": settings.model_provider,
                 "model": settings.codex_model if settings.model_provider == "codex-oauth"
                 else settings.model_provider,
+                "reasoning_effort": settings.codex_reasoning_effort
+                if settings.model_provider == "codex-oauth" else "",
                 "kubeconfig": bool(settings.kubeconfig),
             }
         )
@@ -145,6 +184,130 @@ def make_app(
         if agent is None:
             return JSONResponse({"error": f"에이전트 '{name}' 없음"}, status_code=404)
         return JSONResponse(agent.to_dict(include_instructions=True))
+
+    def _agent_file(name: str):
+        if not _AGENT_NAME_RE.match(name):
+            return None
+        return settings.agents_dir / f"{name}.md"
+
+    def _validate_agent_content(name: str, content: str) -> str | None:
+        """frontmatter를 파싱해 name 일치를 강제한다. 문제 있으면 사유 반환."""
+        import io
+
+        # parse_page는 Path를 받으므로 임시 사용 대신 직접 검사
+        if not content.startswith("---\n"):
+            return "파일은 '---' frontmatter로 시작해야 합니다 (name/description)"
+        try:
+            _, fm_text, _ = content.split("---\n", 2)
+            import yaml as _yaml
+
+            fm = _yaml.safe_load(io.StringIO(fm_text)) or {}
+        except Exception:
+            return "frontmatter YAML 파싱 실패"
+        declared = str(fm.get("name") or "").strip()
+        if declared != name:
+            return f"frontmatter의 name('{declared}')이 파일 이름('{name}')과 일치해야 합니다"
+        return None
+
+    @app.get("/api/agents/{name}/raw")
+    def agent_raw(name: str) -> JSONResponse:
+        agent = agents.get(name)
+        file = _agent_file(name)
+        if file is None or (agent is None and not file.is_file()):
+            return JSONResponse({"error": f"에이전트 '{name}' 없음"}, status_code=404)
+        if file.is_file():
+            content = file.read_text(encoding="utf-8")
+            source = file.name
+        else:  # builtin — 편집 시 파일로 구체화되도록 템플릿 제공
+            content = _AGENT_TEMPLATE.format(name=name)
+            source = "builtin (저장하면 파일로 오버라이드됨)"
+        return JSONResponse({"name": name, "content": content, "source": source})
+
+    @app.put("/api/agents/{name}/raw")
+    def agent_save(name: str, req: AgentSaveRequest) -> JSONResponse:
+        file = _agent_file(name)
+        if file is None:
+            return JSONResponse({"error": "에이전트 이름 형식: 소문자/숫자/하이픈"}, status_code=400)
+        problem = _validate_agent_content(name, req.content)
+        if problem:
+            return JSONResponse({"error": problem}, status_code=400)
+        settings.agents_dir.mkdir(parents=True, exist_ok=True)
+        file.write_text(req.content, encoding="utf-8")
+        _reload_agents()
+        return JSONResponse({"saved": True, "name": name})
+
+    @app.post("/api/agents/create")
+    def agent_create(req: AgentCreateRequest) -> JSONResponse:
+        name = req.name.strip().lower()
+        file = _agent_file(name)
+        if file is None:
+            return JSONResponse({"error": "에이전트 이름 형식: 소문자/숫자/하이픈"}, status_code=400)
+        if file.is_file() or name in agents:
+            return JSONResponse({"error": f"'{name}' 은 이미 존재합니다"}, status_code=409)
+        content = req.content or _AGENT_TEMPLATE.format(name=name)
+        problem = _validate_agent_content(name, content)
+        if problem:
+            return JSONResponse({"error": problem}, status_code=400)
+        settings.agents_dir.mkdir(parents=True, exist_ok=True)
+        file.write_text(content, encoding="utf-8")
+        _reload_agents()
+        return JSONResponse({"created": True, "name": name})
+
+    # ---------- 위키 보기/편집 ----------
+    # 위키는 로컬 스크래치 지식 저장소다(클러스터 리소스 아님) — 브리프가 "사람이 직접
+    # 읽고 수정할 수 있어야 한다"고 요구하므로 편집을 허용하되, 저장 전 레다크션 필터를
+    # 통과시켜 "wiki/ 어디에도 시크릿 평문 없음" 불변식을 편집 경로에서도 유지한다.
+
+    def _safe_wiki_path(rel: str):
+        if not _WIKI_PATH_RE.match(rel) or ".." in rel or rel.startswith("/"):
+            return None
+        wiki_root = settings.wiki_dir.resolve()
+        target = (wiki_root / rel).resolve()
+        if wiki_root not in target.parents:
+            return None
+        return target
+
+    @app.get("/api/wiki")
+    def wiki_index() -> JSONResponse:
+        wiki_root = settings.wiki_dir
+        sections: dict[str, list[dict]] = {}
+        for path in sorted(wiki_root.rglob("*.md")):
+            rel = path.relative_to(wiki_root)
+            section = rel.parts[0] if len(rel.parts) > 1 else "(루트)"
+            frontmatter, _ = parse_page(path)
+            sections.setdefault(section, []).append(
+                {
+                    "path": str(rel),
+                    "name": path.stem,
+                    "hint": str(
+                        frontmatter.get("last_inspected") or frontmatter.get("date") or ""
+                    ),
+                }
+            )
+        return JSONResponse({"sections": sections})
+
+    @app.get("/api/wiki/page")
+    def wiki_page(path: str) -> JSONResponse:
+        target = _safe_wiki_path(path)
+        if target is None or not target.is_file():
+            return JSONResponse({"error": f"페이지 없음: {path}"}, status_code=404)
+        return JSONResponse({"path": path, "content": target.read_text(encoding="utf-8")})
+
+    @app.put("/api/wiki/page")
+    def wiki_save(req: WikiSaveRequest) -> JSONResponse:
+        target = _safe_wiki_path(req.path)
+        if target is None:
+            return JSONResponse({"error": "잘못된 경로입니다"}, status_code=400)
+        if not target.is_file():
+            return JSONResponse(
+                {"error": "존재하는 페이지만 편집할 수 있습니다 (새 페이지는 조사가 만든다)"},
+                status_code=404,
+            )
+        redacted_content = redact_text(req.content)
+        target.write_text(redacted_content, encoding="utf-8")
+        return JSONResponse(
+            {"saved": True, "path": req.path, "redacted": redacted_content != req.content}
+        )
 
     # ---------- 세션별 작업 관리 ----------
     # 대화 context는 thread_id별 checkpointer가 보존한다. 아래 API는 그 위의

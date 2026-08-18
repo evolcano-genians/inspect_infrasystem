@@ -180,14 +180,18 @@ def make_model(settings: Settings) -> BaseChatModel:
     if settings.model_provider == "heuristic":
         return HeuristicPlannerModel()
     if settings.model_provider == "codex-oauth":
-        return make_codex_model(settings.codex_model)
+        return make_codex_model(settings.codex_model, settings.codex_reasoning_effort)
     raise ValueError(
         f"알 수 없는 MODEL_PROVIDER '{settings.model_provider}' (codex-oauth | heuristic | fake)"
     )
 
 
-def make_codex_model(model_name: str) -> BaseChatModel:
+def make_codex_model(model_name: str, reasoning_effort: str = "medium") -> BaseChatModel:
     """백엔드 호환 보정이 적용된 ChatCodexOAuth 를 만든다.
+
+    추론 단계는 low|medium|high 만 허용한다 — "minimal"/"none"(fast 모드)과
+    "xhigh"/"ultra"는 정책상 요청 자체를 거부한다 (codex CLI의 xhigh 설정과 무관하게
+    이 에이전트는 항상 중간 수준 추론으로 동작).
 
     2026-08 현재 신형 모델(gpt-5.6-sol 등)에서 ChatGPT/Codex 백엔드가
     종료 이벤트(response.completed)의 ``response.output`` 을 비워 보내는데,
@@ -201,6 +205,19 @@ def make_codex_model(model_name: str) -> BaseChatModel:
     from codex_oauth.response import CompletionResult, parse_assistant_message
     from codex_oauth.sse import is_terminal_event
     from langchain_codex_oauth import ChatCodexOAuth
+
+    from .config import ALLOWED_REASONING_EFFORTS, FORBIDDEN_REASONING_EFFORTS
+
+    effort = (reasoning_effort or "medium").strip().lower()
+    if effort in FORBIDDEN_REASONING_EFFORTS:
+        raise ValueError(
+            f"추론 단계 '{effort}' 는 정책상 사용하지 않습니다 — "
+            f"fast(minimal/none)와 ultra(xhigh)는 배제되며, 허용값: {ALLOWED_REASONING_EFFORTS}"
+        )
+    if effort not in ALLOWED_REASONING_EFFORTS:
+        raise ValueError(
+            f"알 수 없는 추론 단계 '{effort}' — 허용값: {ALLOWED_REASONING_EFFORTS}"
+        )
 
     class _CompatCodexClient(CodexClient):
         def complete_with_response(self, **kwargs) -> CompletionResult:
@@ -223,7 +240,7 @@ def make_codex_model(model_name: str) -> BaseChatModel:
                 parsed=parse_assistant_message(last_response), response=last_response
             )
 
-    model = ChatCodexOAuth(model=model_name)
+    model = ChatCodexOAuth(model=model_name, reasoning_effort=effort)
     # 어댑터가 만든 동기 클라이언트에 보정 로직을 입힌다 (상태·설정은 그대로 유지).
     model._client.__class__ = _CompatCodexClient
     return model

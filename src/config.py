@@ -24,11 +24,18 @@ class UnsafeKubeconfigError(RuntimeError):
     """마스터 kubeconfig 사용 또는 위험 컨텍스트가 감지되었다."""
 
 
+#: Codex 추론 단계 허용값. "minimal"/"none"(fast 모드)과 "xhigh"(ultra)는 정책상 배제한다 —
+#: fast는 조사 품질이, ultra는 지연·토큰 비용이 문제라 양극단을 모두 금지한다.
+ALLOWED_REASONING_EFFORTS: tuple[str, ...] = ("low", "medium", "high")
+FORBIDDEN_REASONING_EFFORTS: tuple[str, ...] = ("minimal", "none", "xhigh", "ultra")
+
+
 @dataclass(frozen=True)
 class Settings:
     kubeconfig: str | None
     model_provider: str
     codex_model: str
+    codex_reasoning_effort: str
     wiki_dir: Path
     logs_dir: Path
     checkpoint_db: Path
@@ -42,6 +49,7 @@ def load_settings(root: Path | None = None) -> Settings:
         kubeconfig=os.environ.get("KUBECONFIG"),
         model_provider=os.environ.get("MODEL_PROVIDER", "codex-oauth"),
         codex_model=os.environ.get("CODEX_MODEL", "gpt-5.6-sol"),
+        codex_reasoning_effort=os.environ.get("CODEX_REASONING_EFFORT", "medium"),
         wiki_dir=root / "wiki",
         logs_dir=root / "logs",
         checkpoint_db=root / ".checkpoints" / "graph.sqlite",

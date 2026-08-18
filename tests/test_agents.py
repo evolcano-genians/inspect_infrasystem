@@ -102,6 +102,22 @@ def test_chat_rejects_unknown_agent(tmp_path):
     assert events[0]["type"] == "error" and "nope" in events[0]["message"]
 
 
+def test_codex_reasoning_effort_policy():
+    """fast(minimal/none)와 ultra(xhigh) 추론 단계는 요청 생성 전에 거부된다."""
+    import pytest
+
+    from src.llm import make_codex_model
+
+    for forbidden in ("minimal", "none", "xhigh", "ultra", "XHIGH"):
+        with pytest.raises(ValueError, match="정책상|알 수 없는"):
+            make_codex_model("gpt-5.6-sol", forbidden)
+
+    model = make_codex_model("gpt-5.6-sol", "medium")
+    assert model.reasoning_effort == "medium"
+    for allowed in ("low", "high"):
+        assert make_codex_model("gpt-5.6-sol", allowed).reasoning_effort == allowed
+
+
 def test_session_lifecycle_and_per_session_context(tmp_path):
     model = ScriptedChatModel(
         script=[

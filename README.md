@@ -79,6 +79,9 @@ ChatGPT Plus/Pro 구독의 Codex OAuth 세션을 재사용한다. OpenAI API 키
 - **모델명**: 계정/플랜별 지원 모델이 다르다. 어댑터 기본값 `gpt-5.2-codex`는 이 계정에서
   HTTP 400으로 거부되어, codex CLI와 동일한 **`gpt-5.6-sol`** 을 기본값으로 쓴다
   (`CODEX_MODEL`로 변경 가능 — `~/.codex/config.toml`의 `model` 값과 맞추면 안전).
+- **추론 단계 정책**: `CODEX_REASONING_EFFORT`(기본 `medium`)는 `low|medium|high`만 허용한다.
+  fast 모드(minimal/none)와 ultra(xhigh)는 코드가 요청 생성 전에 거부한다 — codex CLI의
+  `xhigh` 설정과 무관하게 이 에이전트는 항상 중간 수준 추론으로 동작한다.
 - **백엔드 호환 보정**: 신형 모델에서 백엔드가 종료 이벤트(`response.completed`)의 `output`을
   비워 보내 어댑터 v1.0.0이 본문·tool call을 유실하는 문제를 발견 →
   `src/llm.py::make_codex_model`이 스트림의 `response.output_item.done` 아이템을 누적해
@@ -243,6 +246,13 @@ KUBECONFIG=.local/kind-kubeconfig.yaml MODEL_PROVIDER=codex-oauth \
   `capacity-analyst`(용량 분석). **보안 불변식**: 에이전트 정의는 프롬프트만 바꾼다 —
   도구 목록·verb 화이트리스트·전송 가드는 어떤 에이전트를 선택해도 동일하다.
   사이드바의 "사용 가능한 도구" 패널이 16개 read-only 도구 전체를 노출한다.
+- **위키 보기·편집**: 사이드바 "📚 위키 보기·편집"으로 장기 기억 전체를 열람·수정할 수 있다.
+  편집 저장 시에도 레다크션 필터가 강제 적용되어 "wiki/에 시크릿 평문 없음" 불변식이
+  유지되고, 경로 조작은 차단되며, 새 페이지 생성은 조사 플로우만 할 수 있다.
+- **에이전트·스킬 보기/편집/추가**: 각 에이전트의 ✎ 버튼으로 정의 원문(지시문/스킬)을
+  확인·수정하고, "＋ 새 에이전트·스킬"로 새 정의를 만들 수 있다. 저장 즉시 레지스트리가
+  리로드되어 다음 질의부터 반영된다. builtin `inspector`를 편집하면 파일로 구체화되어
+  오버라이드된다. (frontmatter `name`과 파일명 일치를 강제)
 - **토큰 사용량 표시**: LLM 응답의 `usage_metadata`를 run 단위로 누적해 턴마다
   실시간 표시하고(🔢 in/out/합계·LLM 호출 수), 세션별 누적 토큰을 사이드바와 헤더에
   보여준다 (`sessions.sqlite`에 저장). CLI도 실행 끝에 사용량을 출력한다.
@@ -271,7 +281,8 @@ KUBECONFIG=.local/kind-kubeconfig.yaml MODEL_PROVIDER=codex-oauth \
 | 9 | 세션 간 위키 재사용 — 두 번째 세션이 재조사 없이 첫 세션의 관찰을 반영 | `test_wiki_reuse_across_sessions.py` | ✗ |
 | 10 | 강건성 회귀 (적대적 리뷰 확정 결함) — 인자 누락·도구 예외·전송가드 위반의 우아한 처리, 조사 한도, thread 재사용 중복 방지 | `test_robustness.py` | ✗ |
 | 11 | 웹 하네스 — SSE 스트림, 웹 경유 우회 시도 거부, 입력 검증, 마스터 kubeconfig fail-fast | `test_web_harness.py` | ✗ |
-| 12 | 에이전트 카탈로그·세션 관리 — .agents 로딩, 프롬프트 주입, 세션별 context 격리/복원/삭제 | `test_agents.py` | ✗ |
+| 12 | 에이전트 카탈로그·세션 관리 — .agents 로딩, 프롬프트 주입, 세션별 context 격리/복원/삭제, 추론 단계 정책 | `test_agents.py` | ✗ |
+| 13 | 편집 API — 위키 편집 시 레다크션 강제·경로 조작 차단, 에이전트 편집/생성·리로드 | `test_editor_api.py` | ✗ |
 
 클러스터 필요 테스트는 `KUBECONFIG` 미설정 시 skip 처리되지만, **공식 검증 절차(§6)는 반드시
 샌드박스를 대상으로 전체 실행**한다.

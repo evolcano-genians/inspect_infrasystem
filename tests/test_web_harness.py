@@ -24,6 +24,7 @@ def _settings(tmp_path, kubeconfig: str) -> Settings:
         kubeconfig=kubeconfig,
         model_provider="fake",
         codex_model="gpt-5.6-sol",
+        codex_reasoning_effort="medium",
         wiki_dir=wiki,
         logs_dir=tmp_path / "logs",
         checkpoint_db=tmp_path / "ckpt" / "graph.sqlite",
