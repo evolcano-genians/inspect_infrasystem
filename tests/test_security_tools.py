@@ -90,8 +90,9 @@ def test_bash_credential_env_blocked_at_run():
     ("10.96.0.10", True),
     ("192.168.1.5", True),
     ("nexus-shell.svc.cluster.local", True),
+    ("https://nexus.vmlab.test/", True),              # 실증 VM(.test) 허용
     ("/work/cloned-src", True),
-    ("http://nexus.clouddev.dev.genians.kr", False),  # 공개 도메인 거부
+    ("http://nexus.clouddev.dev.genians.kr", False),  # 실 운영 도메인 거부
     ("8.8.8.8", False),                               # 공개 IP 거부
     ("https://example.com", False),
 ])
@@ -127,4 +128,4 @@ def test_security_auditor_agent_maps_sandbox_tools():
     sa = agents.get("security-auditor")
     assert sa is not None
     assert "sandbox_bash" in sa.tools and "sandbox_pentest_strix" in sa.tools
-    assert "실 aws/azure" in sa.instructions  # 실 인프라 금지 명시
+    assert "실 운영 자산" in sa.instructions  # 실 인프라 금지 명시

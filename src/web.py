@@ -166,6 +166,18 @@ def make_app(
             )]
         except Exception as exc:
             print(f"경고: 보안 도구 비활성화 — {type(exc).__name__}: {exc}")
+    # Trino 데이터 분석 도구 (TRINO_ENDPOINT 설정 시)
+    if settings.trino_endpoint:
+        from .tools.trino_reader import TrinoConfig, make_trino_tools
+
+        try:
+            extra_tools = [*extra_tools, *make_trino_tools(TrinoConfig(
+                endpoint=settings.trino_endpoint, user=settings.trino_user,
+                token=settings.trino_token, catalog=settings.trino_catalog,
+                schema=settings.trino_schema,
+            ), audit)]
+        except Exception as exc:
+            print(f"경고: Trino 도구 비활성화 — {type(exc).__name__}: {exc}")
 
     # 컨텍스트별 도구 세트 (클러스터 전환용). 기본 컨텍스트는 위에서 만든 k8s/tools 재사용.
     tools_by_context: dict[str, list] = {}

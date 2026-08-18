@@ -54,10 +54,11 @@ def _is_sandbox_target(target: str) -> tuple[bool, str]:
             return True, "private"
         return False, f"공개 IP {host} 는 대상이 될 수 없습니다 (샌드박스/사설만 허용)"
     except ValueError:
-        # .svc.cluster.local, kind 서비스명 등 사설 DNS만 허용
-        if host.endswith((".svc", ".svc.cluster.local", ".local")) or host.endswith("-sandbox"):
-            return True, "cluster-dns"
-        return False, f"공개 도메인 {host!r} 은 대상이 될 수 없습니다 (샌드박스만 허용)"
+        # 사설/실증 DNS만 허용: .test(실증 VM)·.local·클러스터 내부 DNS·kind
+        if (host.endswith((".test", ".svc", ".svc.cluster.local", ".local", ".localhost"))
+                or host.endswith("-sandbox")):
+            return True, "sandbox-dns"
+        return False, f"공개 도메인 {host!r} 은 대상이 될 수 없습니다 (샌드박스/실증만 허용)"
 
 
 def make_security_tools(

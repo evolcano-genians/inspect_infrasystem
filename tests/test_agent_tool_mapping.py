@@ -36,6 +36,8 @@ def _all_tool_names() -> set[str]:
         def containers(self):
             return type("C", (), {"run": lambda *a, **k: None})()
 
+    from src.tools.trino_reader import TrinoConfig, make_trino_tools
+
     k8s_tools = make_tools(WideStub())
     src_tools = make_source_tools(SourceHost("heejoon@172.29.70.161"))
     sec_tools = make_security_tools(
@@ -43,7 +45,8 @@ def _all_tool_names() -> set[str]:
         sandbox=BashSandbox(network="none", docker_client=_FakeDocker()),
         runner=lambda *a, **k: None,
     )
-    return {t.name for t in [*k8s_tools, *src_tools, *sec_tools]}
+    trino_tools = make_trino_tools(TrinoConfig(endpoint="http://trino:8080"))
+    return {t.name for t in [*k8s_tools, *src_tools, *sec_tools, *trino_tools]}
 
 
 def test_every_agent_tool_mapping_points_to_real_tools():

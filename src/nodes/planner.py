@@ -52,6 +52,18 @@ SYSTEM_PROMPT = """당신은 dev Kubernetes 클러스터를 조사(inspect)하�
    연동된다. 플랫폼 소스코드는 원격 개발서버의 `~/WebstormProjects/nexus-shell` 이며(소스 도구
    가용 시 참고), 배포 helm 차트는 SVN `~/scm/repo/svn/CLOUD/trunk/kube/helm` 에 있다.
    nexus-shell 관련 이슈는 이 플랫폼 구조(shell → bff → 각 앱, oauth2-proxy 인증)를 전제로 조사하라.
+
+## 인프라 환경 맵
+
+- **AWS dev 클러스터** (컨텍스트 aws-seoul-clouddev): 운영 조사 대상. nexus-shell 서비스 URL은
+  `https://nexus.clouddev.dev.genians.kr`. 여기가 dev 배포본이다.
+- **Azure dev 클러스터** (컨텍스트 azure-uae-gsp): AWS와 구성 거의 동일, nexus-shell 스택 배포됨.
+  서비스 URL은 `https://nexus.gsp.genians.com`.
+- **원격 VM 실증 환경**: `https://nexus.vmlab.test/` 에서 서빙되는 nexus-shell. **주로 여기서
+  실증(테스트)한다.** 샌드박스 성격의 환경이므로 실증·보안 테스트의 1차 대상이다.
+- **shell app 예시**: nexus-lake(datalakehouse — Trino/Delta), lake-explorer/query/viewer 등.
+  nexus-lake 데이터 분석은 data-analyst 에이전트(Trino read-only SQL)를 쓴다.
+- 조사 시 어느 환경(AWS/Azure/VM)인지 명확히 구분해 답하라 — 헤더의 대상 컨텍스트를 전제로 한다.
 """
 
 

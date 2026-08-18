@@ -57,6 +57,11 @@ class Settings:
     source_ssh_host: str = ""  # user@host — 소스 read-only 조회용 (SOURCE_SSH_HOST)
     sandbox_bash_enabled: bool = False  # 샌드박스 격리 bash (SANDBOX_BASH_ENABLED)
     strix_enabled: bool = False  # strix pentest (STRIX_ENABLED)
+    trino_endpoint: str = ""  # nexus-lake Trino read-only SQL (TRINO_ENDPOINT)
+    trino_user: str = "inspect-k8s"
+    trino_token: str = ""
+    trino_catalog: str = ""
+    trino_schema: str = ""
 
 
 def load_settings(root: Path | None = None) -> Settings:
@@ -76,6 +81,11 @@ def load_settings(root: Path | None = None) -> Settings:
         source_ssh_host=os.environ.get("SOURCE_SSH_HOST", ""),
         sandbox_bash_enabled=_truthy(os.environ.get("SANDBOX_BASH_ENABLED")),
         strix_enabled=_truthy(os.environ.get("STRIX_ENABLED")),
+        trino_endpoint=os.environ.get("TRINO_ENDPOINT", ""),
+        trino_user=os.environ.get("TRINO_USER", "inspect-k8s"),
+        trino_token=os.environ.get("TRINO_TOKEN", ""),
+        trino_catalog=os.environ.get("TRINO_CATALOG", ""),
+        trino_schema=os.environ.get("TRINO_SCHEMA", ""),
     )
 
 
