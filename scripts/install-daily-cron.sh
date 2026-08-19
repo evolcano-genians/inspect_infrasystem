@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 매일 15:50 일일 대화 요약 → Confluence 비공개 게시 크론 설치/제거.
+# 매일 15:30 일일 대화 요약 → Confluence 비공개 게시 크론 설치/제거.
 #
 # 사용:
 #   scripts/install-daily-cron.sh          # 설치(또는 갱신)
@@ -16,7 +16,7 @@ LOG="$PROJECT_ROOT/logs/daily-report-cron.log"
 TAG="# inspect-k8s-daily-report"
 # codex OAuth·JIRA 자격증명은 .env / ~/.langchain-codex-oauth 에서 로드된다.
 # 크론은 최소 PATH만 가지므로 필요한 것만 명시. MODEL_PROVIDER는 .env 기본값(codex-oauth) 사용.
-CRON_LINE="50 15 * * * cd $PROJECT_ROOT && PATH=/usr/local/bin:/usr/bin:/bin HOME=$HOME $PY -m src.daily_report >> $LOG 2>&1 $TAG"
+CRON_LINE="30 15 * * * cd $PROJECT_ROOT && PATH=/usr/local/bin:/usr/bin:/bin HOME=$HOME $PY -m src.daily_report >> $LOG 2>&1 $TAG"
 
 case "${1:-install}" in
   --show)
@@ -33,7 +33,7 @@ case "${1:-install}" in
     current="$(crontab -l 2>/dev/null || true)"
     kept="$(printf '%s\n' "$current" | grep -vF "$TAG" | grep -v '^$' || true)"
     { [ -n "$kept" ] && printf '%s\n' "$kept"; printf '%s\n' "$CRON_LINE"; } | crontab -
-    echo "✓ 설치됨 — 매일 15:50 실행"
+    echo "✓ 설치됨 — 매일 15:30 실행"
     echo "  로그: $LOG"
     echo "  현재 등록:"
     crontab -l 2>/dev/null | grep -F "$TAG" | sed 's/^/    /'
