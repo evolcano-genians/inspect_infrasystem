@@ -363,23 +363,44 @@
     display: flex; align-items: center; gap: 6px; max-width: 78%;
     white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
   }
-  /* 도구 호출: 접힌 요약(▶ 이름 + 짧은 힌트), 클릭 시 인자 전체 펼침 */
-  .event.toolCall { display: block; padding: 0; cursor: pointer; }
-  .event.toolCall > summary {
+  /* 도구 그룹: 한 턴의 모든 도구 활동을 하나의 접힌 묶음으로. 클릭하면 전체 목록. */
+  .event.toolGroup, .event.toolCall { display: block; padding: 0; cursor: pointer; }
+  .event.toolGroup > summary, .event.toolCall > summary {
     list-style: none; padding: 5px 10px; display: flex; gap: 8px; align-items: baseline;
     white-space: nowrap; overflow: hidden;
   }
+  .event.toolGroup > summary::-webkit-details-marker,
   .event.toolCall > summary::-webkit-details-marker { display: none; }
-  .event.toolCall > summary::before { content: "▸"; color: var(--muted); font-size: 10px; }
-  .event.toolCall[open] > summary::before { content: "▾"; }
-  .event.toolCall > summary b { color: var(--ink); font-weight: 600; flex-shrink: 0; }
-  .event.toolCall .argHint { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+  .event.toolGroup > summary::before, .event.toolCall > summary::before {
+    content: "▸"; color: var(--muted); font-size: 10px; }
+  .event.toolGroup[open] > summary::before, .event.toolCall[open] > summary::before { content: "▾"; }
+  .event.toolGroup > summary b, .event.toolCall > summary b {
+    color: var(--ink); font-weight: 600; flex-shrink: 0; }
+  .event.toolGroup .argHint, .event.toolCall .argHint {
+    color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+  .event.toolGroup.hasProblem > summary b { color: var(--bad); }
+  .event.toolGroup .toolGroupBody { border-top: 1px solid var(--line); }
+  /* 그룹 안의 개별 도구 행 (다시 접힘, 클릭 시 인자 전체) */
+  .toolRow { display: block; }
+  .toolRow > summary {
+    list-style: none; padding: 4px 10px 4px 22px; display: flex; gap: 8px; align-items: baseline;
+    white-space: nowrap; overflow: hidden; font-size: 12px; cursor: pointer;
+  }
+  .toolRow > summary::-webkit-details-marker { display: none; }
+  .toolRow:hover > summary { background: var(--panel); }
+  .toolRow > summary b { color: var(--ink); font-weight: 600; }
+  .toolRow.st-row-거부 > summary b, .toolRow.st-row-오류 > summary b { color: var(--bad); }
+  .toolRow > pre {
+    margin: 0; padding: 6px 10px 6px 22px; font-size: 11.5px;
+    white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; color: var(--muted);
+  }
   .event.toolCall > pre {
     margin: 0; padding: 8px 10px; border-top: 1px solid var(--line); font-size: 12px;
     white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; color: var(--ink);
   }
   .event.toolResult { flex-wrap: wrap; }
-  .event .resPreview { overflow-wrap: anywhere; }
+  .event .resPreview, .toolRow .resPreview { overflow-wrap: anywhere; padding: 2px 10px 4px 22px;
+    font-size: 11.5px; color: var(--bad); }
   .event .st-허용 { color: var(--ok); font-weight: 600; }
   .event .st-거부 { color: var(--bad); font-weight: 600; }
   .event .st-오류 { color: var(--warn); font-weight: 600; }
@@ -688,20 +709,50 @@ function argHint(args) {
   return parts.join(" ");
 }
 
-// 도구 호출을 접힌 형태로 — 일일이 나열하지 않고 클릭하면 인자 전체를 펼쳐 본다.
-function addToolCall(name, args) {
+// 한 턴의 모든 도구 활동을 하나의 접힌 그룹으로 묶는다 — 일일이 나열하지 않고
+// 클릭하면 사용한 도구 전체 목록(인자·결과)이 펼쳐진다.
+let currentToolGroup = null;
+
+function ensureToolGroup() {
+  if (currentToolGroup) return currentToolGroup;
   const det = document.createElement("details");
-  det.className = "event toolCall";
+  det.className = "event toolGroup";
+  const sum = document.createElement("summary");
+  const nm = document.createElement("b");
+  const hint = document.createElement("span"); hint.className = "argHint";
+  sum.append(nm, hint);
+  const body = document.createElement("div"); body.className = "toolGroupBody";
+  det.append(sum, body);
+  log.appendChild(det);
+  const state = { det, sum, nm, hint, body, count: 0, names: {} };
+  state.update = () => {
+    nm.textContent = "🛠 사용한 도구 " + state.count + "회";
+    const top = Object.entries(state.names).sort((a, b) => b[1] - a[1])
+      .slice(0, 3).map(([n]) => n);
+    const extra = Object.keys(state.names).length - top.length;
+    hint.textContent = "클릭하여 보기 · " + top.join(", ") + (extra > 0 ? ` 외 ${extra}종` : "");
+  };
+  currentToolGroup = state;
+  return state;
+}
+
+// 도구 호출 — 그룹 본문에 접힌 한 줄(클릭 시 인자 전체) 추가
+function addToolCall(name, args) {
+  const g = ensureToolGroup();
+  g.count++; g.names[name] = (g.names[name] || 0) + 1; g.update();
+  const row = document.createElement("details");
+  row.className = "toolRow";
   const sum = document.createElement("summary");
   const nm = document.createElement("b"); nm.textContent = "▶ " + name;
   const hint = document.createElement("span"); hint.className = "argHint"; hint.textContent = argHint(args);
   sum.append(nm, hint);
   const pre = document.createElement("pre");
   pre.textContent = JSON.stringify(args || {}, null, 2);
-  det.append(sum, pre);
-  log.appendChild(det);
+  row.append(sum, pre);
+  g.body.appendChild(row);
+  row._name = name;   // 결과를 이 행에 붙이기 위해
   log.scrollTop = log.scrollHeight;
-  return det;
+  return row;
 }
 
 // 복원된 이전 조사의 도구 호출 묶음 — 한 줄 요약, 클릭하면 전체 목록
@@ -724,18 +775,33 @@ function addToolBatch(calls) {
   log.scrollTop = log.scrollHeight;
 }
 
+// 도구 결과 — 그룹 안의 해당 호출 행 요약에 상태 배지를 붙인다(거부/오류는 미리보기도).
 function addToolResult(name, status, preview) {
-  const node = el("div", "event toolResult");
+  const g = currentToolGroup;
   const badge = document.createElement("span");
-  badge.className = "st-" + status;
-  badge.textContent = status;
-  node.append("🛠 " + name + " → ");
-  node.appendChild(badge);
-  if (status !== "허용" && preview) {
-    const p = document.createElement("span");
-    p.className = "resPreview";
-    p.textContent = " · " + preview.slice(0, 160);
-    node.appendChild(p);
+  badge.className = "st-" + status; badge.textContent = status;
+  // 그룹에서 아직 결과가 안 붙은 같은 이름의 호출 행을 찾아 배지를 단다
+  let attached = false;
+  if (g) {
+    const rows = g.body.querySelectorAll("details.toolRow");
+    for (let i = rows.length - 1; i >= 0; i--) {
+      if (rows[i]._name === name && !rows[i]._done) {
+        rows[i]._done = true;
+        rows[i].querySelector("summary").appendChild(badge);
+        if (status !== "허용") rows[i].classList.add("st-row-" + status);
+        if (status !== "허용" && preview) {
+          const p = document.createElement("div"); p.className = "resPreview";
+          p.textContent = preview.slice(0, 200); rows[i].appendChild(p);
+        }
+        attached = true; break;
+      }
+    }
+    // 거부/오류가 하나라도 있으면 그룹 요약에 표시
+    if (status !== "허용") g.det.classList.add("hasProblem");
+  }
+  if (!attached) {  // 그룹이 없으면(방어) 단독 표시
+    const node = el("div", "event toolResult");
+    node.append("🛠 " + name + " → "); node.appendChild(badge);
   }
   log.scrollTop = log.scrollHeight;
 }
@@ -1995,6 +2061,7 @@ async function send(message) {
   }
   const status = makeStatus();
   currentStatus = status;
+  currentToolGroup = null;   // 턴마다 새 도구 그룹
   sendBtn.disabled = true;
   usageChip = null;   // 턴마다 새 사용량 칩
   try {
