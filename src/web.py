@@ -155,6 +155,28 @@ def _test_connection(group: str, env: dict) -> dict:
         who = data.get("displayName") or data.get("name") or "OK"
         return {"ok": True, "message": f"연결 성공 · 로그인: {who} ({cfg.auth_kind()} 인증)"}
 
+    if group == "Confluence":
+        from .tools.confluence_reader import ConfluenceClient, load_confluence_config
+
+        cfg = load_confluence_config(env)
+        if not cfg:
+            return {"ok": False, "message": "Jira(또는 Confluence) Base URL·토큰이 필요합니다"}
+        me = ConfluenceClient(cfg)._get("/wiki/rest/api/user/current")
+        return {"ok": True,
+                "message": f"연결 성공 · 로그인: {me.get('displayName', 'OK')} (Jira 자격증명 공유)"}
+
+    if group.startswith("FishEye"):
+        from .tools.fisheye_reader import FisheyeClient, load_fisheye_config
+
+        cfg = load_fisheye_config(env)
+        if not cfg:
+            return {"ok": False, "message": "FISHEYE_BASE_URL 이 비어 있습니다"}
+        # 인증 확인용 최소 조회 — 열린 리뷰 목록(빈 결과여도 인증 자체는 검증된다)
+        data = FisheyeClient(cfg)._get("/rest-service/reviews-v1/filter/allOpenReviews")
+        reviews = data.get("reviewData") or data.get("review") or []
+        n = len(reviews) if isinstance(reviews, list) else 1
+        return {"ok": True, "message": f"연결 성공 ({cfg.auth_kind()} 인증) · 열린 리뷰 {n}건 조회"}
+
     if group.startswith("Trino"):
         from .tools.trino_reader import TrinoClient, TrinoConfig
 
@@ -280,6 +302,14 @@ def make_app(
             )]
         except Exception as exc:
             print(f"경고: 보안 도구 비활성화 — {type(exc).__name__}: {exc}")
+    # 웹 보안 테스팅 도구 — 항상 노출한다. SSRF 게이트(_authorize_web_target)가 메타데이터·
+    # 내부 API 포트를 차단하고 read-only(GET/HEAD)만 허용하므로 opt-in 설정 없이 안전하다.
+    try:
+        from .tools.web_test import make_web_test_tools
+
+        extra_tools = [*extra_tools, *make_web_test_tools(audit=audit)]
+    except Exception as exc:
+        print(f"경고: 웹 테스트 도구 비활성화 — {type(exc).__name__}: {exc}")
     # Trino 데이터 분석 도구 (TRINO_ENDPOINT 설정 시)
     if settings.trino_endpoint:
         from .tools.trino_reader import TrinoConfig, make_trino_tools
@@ -312,6 +342,30 @@ def make_app(
             ), audit, redactor=redact_text)]
         except Exception as exc:
             print(f"경고: Jira 도구 비활성화 — {type(exc).__name__}: {exc}")
+    # Confluence read-only 조회 (Jira 와 같은 Atlassian Cloud — 자격증명 공유, 별도 설정 불필요)
+    import os as _os
+
+    _conf_cfg = None
+    try:
+        from .tools.confluence_reader import load_confluence_config, make_confluence_tools
+
+        _conf_cfg = load_confluence_config({**_os.environ, **{
+            "JIRA_BASE_URL": settings.jira_base_url, "JIRA_USER": settings.jira_user,
+            "JIRA_TOKEN": settings.jira_token,
+        }})
+        if _conf_cfg:
+            extra_tools = [*extra_tools, *make_confluence_tools(_conf_cfg, audit, redactor=redact_text)]
+    except Exception as exc:
+        print(f"경고: Confluence 도구 비활성화 — {type(exc).__name__}: {exc}")
+    # FishEye/Crucible 코드 리뷰 조회 (FISHEYE_BASE_URL 설정 시) — 온프레미스 별도 계정
+    try:
+        from .tools.fisheye_reader import load_fisheye_config, make_fisheye_tools
+
+        _fe_cfg = load_fisheye_config(dict(_os.environ))
+        if _fe_cfg:
+            extra_tools = [*extra_tools, *make_fisheye_tools(_fe_cfg, audit, redactor=redact_text)]
+    except Exception as exc:
+        print(f"경고: FishEye 도구 비활성화 — {type(exc).__name__}: {exc}")
 
     # 컨텍스트별 도구 세트 (클러스터 전환용). 기본 컨텍스트는 위에서 만든 k8s/tools 재사용.
     tools_by_context: dict[str, list] = {}

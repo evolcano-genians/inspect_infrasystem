@@ -37,6 +37,14 @@ SETTINGS_CATALOG: tuple[SettingField, ...] = (
                  help="비우면 PAT(Bearer). Cloud/basic이면 이메일"),
     SettingField("JIRA_COOKIE", "세션 쿠키 (SSO 폴백)", "Jira", secret=True,
                  help="PAT 미지원 시에만: 브라우저 세션 쿠키. 만료되면 갱신 필요"),
+    # FishEye/Crucible (온프레미스 — Atlassian Cloud 와 별개 계정)
+    SettingField("FISHEYE_BASE_URL", "Base URL", "FishEye/Crucible",
+                 placeholder="https://fisheye.genians.com",
+                 help="코드 리뷰(CRU) 조회. 온프레미스라 Cloud 토큰과 별개 계정입니다"),
+    SettingField("FISHEYE_USER", "계정", "FishEye/Crucible",
+                 help="FishEye 로그인 아이디"),
+    SettingField("FISHEYE_PASSWORD", "비밀번호", "FishEye/Crucible", secret=True,
+                 help="FishEye 로그인 비밀번호(또는 앱 비밀번호)"),
     # Trino (nexus-lake 데이터 분석)
     SettingField("TRINO_ENDPOINT", "Endpoint", "Trino (nexus-lake)",
                  placeholder="http://trino:8080"),
