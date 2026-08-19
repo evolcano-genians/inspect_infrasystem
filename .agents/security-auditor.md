@@ -16,6 +16,7 @@ tools:
   - k8s_list_cluster_role_bindings
   - k8s_get_role
   - k8s_list_networkpolicies
+  - k8s_oss_inventory
   - sandbox_bash
   - sandbox_pentest_strix
   - web_probe

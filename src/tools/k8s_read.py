@@ -623,6 +623,69 @@ class ReadOnlyK8sClient:
             )
         return out
 
+    def oss_inventory(self, namespace: str = "", include_internal: bool = False) -> dict:
+        """배포된 워크로드 이미지를 오픈소스 프로젝트별로 집계한다 (read-only).
+
+        Deployment/StatefulSet/DaemonSet 의 컨테이너 이미지를 모아 identify_oss 로 판별하고
+        프로젝트·범주·버전(태그)·사용처로 묶는다. namespace="" 이면 전 네임스페이스.
+        include_internal=False 면 회사 자체 앱(genians-app)은 요약 카운트만 남기고 목록에서 뺀다.
+        """
+        from .oss_catalog import identify_oss
+
+        namespaces = [namespace] if namespace else [
+            n["name"] for n in self.list_namespaces()
+        ]
+        # project -> {category, versions:set, usages:[ns/kind/name], repos:set, third_party}
+        agg: dict[str, dict] = {}
+        internal_count = 0
+        listers = (("Deployment", self.list_deployments),
+                   ("StatefulSet", self.list_statefulsets),
+                   ("DaemonSet", self.list_daemonsets))
+        for ns in namespaces:
+            for kind, lister in listers:
+                try:
+                    items = lister(ns)
+                except ApiException:
+                    continue
+                for w in items:
+                    for image in (w.get("images") or []):
+                        info = identify_oss(image)
+                        if not info["third_party"]:
+                            internal_count += 1
+                            if not include_internal:
+                                continue
+                        key = info["project"]
+                        e = agg.setdefault(key, {
+                            "project": key, "category": info["category"],
+                            "third_party": info["third_party"],
+                            "versions": set(), "repos": set(), "usages": [],
+                        })
+                        if info["version"]:
+                            e["versions"].add(info["version"])
+                        e["repos"].add(info["repo"])
+                        if len(e["usages"]) < 8:
+                            e["usages"].append(f"{ns}/{kind}/{w.get('name')}")
+        projects = []
+        for e in agg.values():
+            projects.append({
+                "project": e["project"], "category": e["category"],
+                "third_party": e["third_party"],
+                "versions": sorted(e["versions"]), "repos": sorted(e["repos"]),
+                "usages": e["usages"],
+            })
+        projects.sort(key=lambda p: (not p["third_party"], p["category"], p["project"].lower()))
+        by_cat: dict[str, int] = {}
+        for p in projects:
+            if p["third_party"]:
+                by_cat[p["category"]] = by_cat.get(p["category"], 0) + 1
+        return {
+            "scope": namespace or "(전체 네임스페이스)",
+            "oss_count": sum(1 for p in projects if p["third_party"]),
+            "by_category": by_cat,
+            "internal_app_images": internal_count,
+            "projects": projects,
+        }
+
     def top_pods(self, namespace: str) -> list[dict]:
         """metrics.k8s.io 조회 (GET). metrics-server 미설치 시 ApiException(404/503)."""
         body = self._list_namespaced_custom("metrics.k8s.io", "v1beta1", namespace, "pods")
@@ -1056,6 +1119,14 @@ def make_tools(k8s, audit: AuditLogger | None = None) -> list[StructuredTool]:
             "k8s_list_nodes", "list", "nodes",
             "클러스터 노드 목록과 상태를 조회한다.",
             lambda: k8s.list_nodes(),
+        ),
+        (
+            "k8s_oss_inventory", "list", "workloads",
+            "배포된 워크로드 이미지를 분석해 **어떤 오픈소스가 적용됐는지** 프로젝트·범주·버전으로 "
+            "집계한다(Traefik·Kafka·Trino·Prometheus 스택·Keycloak·CrowdSec 등). namespace 로 범위를 "
+            "좁힐 수 있고, include_internal=true 면 회사 자체 앱도 포함한다. 스택 파악·버전 점검·"
+            "업그레이드 대상 식별에 사용.",
+            lambda namespace="", include_internal=False: k8s.oss_inventory(namespace, include_internal),
         ),
         (
             "k8s_get_node", "get", "nodes",

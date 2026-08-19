@@ -174,6 +174,7 @@ _REPRESENTATIVE_ARGS: dict[str, dict] = {
     # 신규 k8s 감사 도구 — bool 인자(include_system) fail-closed 회귀 방지
     "k8s_list_cluster_role_bindings": {"include_system": False},
     "k8s_get_role": {"name": "admin", "namespace": ""},
+    "k8s_oss_inventory": {"namespace": "", "include_internal": False},
 }
 
 

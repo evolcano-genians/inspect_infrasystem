@@ -65,7 +65,7 @@ _INT_ARGS: dict[str, tuple[int, int]] = {
     "max_rows": (1, 100_000),   # trino 조회 행 상한
     "timeout": (1, 1800),       # sandbox_bash 실행 타임아웃(초)
 }
-_BOOL_ARGS = frozenset({"previous", "include_system"})
+_BOOL_ARGS = frozenset({"previous", "include_system", "include_internal"})
 # 소스 조회(source_reader) 전용 인자 — SourceHost 내부에서 재검증·shlex 인용된다.
 _SOURCE_PATH_ARGS = frozenset({"path"})
 _SOURCE_FREE_ARGS = frozenset({"pattern", "glob", "filename"})

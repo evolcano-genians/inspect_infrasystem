@@ -11,6 +11,7 @@ tools:
   - k8s_list_endpoints
   - k8s_list_ingresses
   - k8s_list_custom
+  - k8s_oss_inventory
   - src_search
   - src_read_file
 ---
