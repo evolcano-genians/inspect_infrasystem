@@ -35,8 +35,7 @@ def _local_date_str(dt_iso: str) -> str:
         return ""
 
 
-def collect_turns(devlog_path: Path, day: str) -> list[dict]:
-    """지정 날짜(로컬)의 turn 레코드만 모은다."""
+def _all_turns(devlog_path: Path) -> list[dict]:
     if not devlog_path.exists():
         return []
     out = []
@@ -48,9 +47,32 @@ def collect_turns(devlog_path: Path, day: str) -> list[dict]:
             e = json.loads(line)
         except Exception:
             continue
-        if e.get("type") == "turn" and _local_date_str(e.get("timestamp", "")) == day:
+        if e.get("type") == "turn":
             out.append(e)
     return out
+
+
+def collect_turns(devlog_path: Path, day: str) -> list[dict]:
+    """지정 날짜(로컬)의 turn 레코드만 모은다."""
+    return [e for e in _all_turns(devlog_path)
+            if _local_date_str(e.get("timestamp", "")) == day]
+
+
+def latest_active_day(devlog_path: Path, *, within_days: int = 5) -> str | None:
+    """최근 활동(turn)이 있는 가장 최신 날짜(로컬 YYYY-MM-DD)를 찾는다.
+
+    launchd 보충 실행이 자정을 넘겨 다음 날 아침에 돌더라도, '오늘(빈 날)'이 아니라
+    실제로 작업한 마지막 날을 요약하도록 한다. within_days 안에서만 찾는다(오래된 기록 무시).
+    """
+    from datetime import datetime, timedelta
+
+    recent = {
+        (datetime.now().astimezone() - timedelta(days=i)).strftime("%Y-%m-%d")
+        for i in range(within_days + 1)
+    }
+    days = {d for e in _all_turns(devlog_path)
+            if (d := _local_date_str(e.get("timestamp", ""))) in recent}
+    return max(days) if days else None
 
 
 def group_by_project(turns: list[dict], sessions) -> dict[str, list[dict]]:
@@ -233,9 +255,13 @@ def run(*, day: str | None = None, dry_run: bool = False) -> dict:
     from .sessions import SessionStore
 
     settings = load_settings()
-    day = day or datetime.now().astimezone().strftime("%Y-%m-%d")
+    devlog_path = settings.logs_dir / "devlog.jsonl"
+    # 날짜 미지정 시: 오늘에 기록이 있으면 오늘, 없으면 최근 활동일(보충 실행 대비).
+    if not day:
+        today = datetime.now().astimezone().strftime("%Y-%m-%d")
+        day = today if collect_turns(devlog_path, today) else (latest_active_day(devlog_path) or today)
 
-    turns = collect_turns(settings.logs_dir / "devlog.jsonl", day)
+    turns = collect_turns(devlog_path, day)
     if not turns:
         return {"ok": True, "skipped": True, "reason": f"{day} 대화 기록 없음"}
 

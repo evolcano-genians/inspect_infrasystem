@@ -128,3 +128,22 @@ def test_publish_creates_then_updates_idempotently():
 def test_local_date_str_handles_bad_input():
     assert _local_date_str("") == ""
     assert _local_date_str("not-a-date") == ""
+
+
+def test_latest_active_day_for_wake_catchup(tmp_path):
+    """launchd 보충 실행이 자정을 넘겨도 '최근 활동일'을 고른다."""
+    from datetime import datetime, timedelta, timezone
+
+    from src.daily_report import latest_active_day
+    log = tmp_path / "devlog.jsonl"
+    today = datetime.now().astimezone()
+    y1 = today - timedelta(days=1)
+    y2 = today - timedelta(days=2)
+    _write_turns(log, [
+        {"type": "turn", "timestamp": y1.astimezone(timezone.utc).isoformat(), "thread_id": "a"},
+        {"type": "turn", "timestamp": y2.astimezone(timezone.utc).isoformat(), "thread_id": "b"},
+    ])
+    # 오늘은 기록이 없으니 어제(가장 최근 활동일)를 반환
+    assert latest_active_day(log) == y1.strftime("%Y-%m-%d")
+    # 활동이 아예 없으면 None
+    assert latest_active_day(tmp_path / "empty.jsonl") is None
