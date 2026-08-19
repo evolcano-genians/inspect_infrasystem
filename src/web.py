@@ -167,6 +167,18 @@ def _test_connection(group: str, env: dict) -> dict:
         who = data.get("displayName") or data.get("name") or "OK"
         return {"ok": True, "message": f"연결 성공 · 로그인: {who} ({cfg.auth_kind()} 인증)"}
 
+    if group == "Slack":
+        from .slack_notify import SlackError, load_slack_config, send_slack
+
+        cfg = load_slack_config(env)
+        if cfg is None:
+            return {"ok": False, "message": "SLACK_WEBHOOK_URL(또는 봇 토큰+DM)이 필요합니다"}
+        try:
+            send_slack(cfg, "✅ inspect-k8s 연결 테스트 — 아침 트리아지 알림이 여기로 옵니다.")
+        except SlackError as exc:
+            return {"ok": False, "message": str(exc)}
+        return {"ok": True, "message": f"전송 성공 ({cfg.mode()} 방식) — Slack DM을 확인하세요"}
+
     if group == "Confluence":
         from .tools.confluence_reader import ConfluenceClient, load_confluence_config
 

@@ -60,6 +60,14 @@ SETTINGS_CATALOG: tuple[SettingField, ...] = (
                  placeholder="python:3.12-slim", help="code-reviewer 코드 재현 런타임"),
     SettingField("STRIX_ALLOWED_TARGETS", "strix 허용 대상", "샌드박스",
                  help="콤마 구분 CIDR/호스트/*.도메인 (하드 denylist는 불변)"),
+    # Slack (아침 트리아지 개인 DM 알림)
+    SettingField("SLACK_WEBHOOK_URL", "Incoming Webhook URL", "Slack", secret=True,
+                 placeholder="https://hooks.slack.com/services/…",
+                 help="가장 간단: Slack 앱에서 Incoming Webhook 생성 시 본인 DM 선택 → URL 붙여넣기"),
+    SettingField("SLACK_BOT_TOKEN", "Bot Token (대안)", "Slack", secret=True,
+                 placeholder="xoxb-…", help="웹훅 대신 봇 토큰 사용 시. chat:write 권한 필요"),
+    SettingField("SLACK_DM_CHANNEL", "DM 대상 (봇 방식)", "Slack",
+                 placeholder="U0XXXXXXX", help="봇 토큰 사용 시 본인 Slack 멤버 ID"),
 )
 
 _CATALOG_BY_KEY = {f.key: f for f in SETTINGS_CATALOG}

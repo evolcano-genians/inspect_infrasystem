@@ -24,3 +24,5 @@ type: workload
 - 2026-08-18T23:05:47+00:00: phase=Running
 - 2026-08-18T23:28:20+00:00: phase=Running
 - 2026-08-19T00:27:04+00:00: phase=Running
+- 2026-08-19T01:32:58+00:00: 리소스 사용량 — loki: cpu=7m mem=179884Ki
+- 2026-08-19T01:50:17+00:00: phase=Running
