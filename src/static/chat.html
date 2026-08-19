@@ -270,6 +270,7 @@
     <div class="section-label">지식 · 진화</div>
     <button class="newBtn" id="wikiBtn" type="button">📚 위키 보기·편집</button>
     <button class="newBtn" id="reflectBtn" type="button">🧬 이 세션에서 배우기</button>
+    <button class="newBtn" id="curatorBtn" type="button" title="위키 지식을 LLM으로 보정(사실체크·폐기·중복정리)">🧹 위키 큐레이터</button>
     <details id="toolsBox">
       <summary>🛠 사용 가능한 도구</summary>
       <div id="tools"></div>
@@ -979,6 +980,30 @@ async function openMetaprompt() {
   await build();
 }
 document.getElementById("metaBtn").addEventListener("click", openMetaprompt);
+
+// ---------- 위키 큐레이터 ----------
+document.getElementById("curatorBtn").addEventListener("click", async () => {
+  try {
+    const s = await (await fetch("/api/curator")).json();
+    const q = s.queue || {};
+    const qStr = Object.keys(q).length ? Object.entries(q).map(([k, v]) => `${k}:${v}`).join(" ") : "비어있음";
+    addEvent(`🧹 위키 큐레이터 — 주기실행 ${s.enabled ? "ON" : "OFF"}(${Math.round(s.interval_s / 3600)}h) · 큐 [${qStr}]`
+      + `\n최근 저널: ` + ((s.journal || []).slice(0, 3).map(j => `${j.target}(${j.action})`).join(", ") || "없음"));
+  } catch (e) { /* 무시 */ }
+  const waiting = addEvent("🧹 위키 큐레이션 사이클 실행 중… (사실체크·폐기·중복정리, LLM 호출로 다소 걸립니다)");
+  try {
+    const res = await fetch("/api/curator/run", { method: "POST" });
+    const d = await res.json();
+    waiting.remove();
+    if (!res.ok) { addEvent("⛔ 큐레이션 실패: " + (d.error || res.status)).classList.add("error"); return; }
+    addEvent(`🧹 큐레이션 사이클 완료 — 큐잉 ${d.queued} · 처리 ${d.processed} · 적용 ${d.applied}`
+      + ` · 큐상태 [${Object.entries(d.stats || {}).map(([k, v]) => `${k}:${v}`).join(" ") || "비어있음"}]`
+      + `\n위키가 갱신되었습니다 — '📚 위키 보기·편집'에서 확인하세요.`);
+  } catch (err) {
+    waiting.remove();
+    addEvent("⛔ 큐레이션 실패: " + err.message).classList.add("error");
+  }
+});
 
 document.getElementById("ovSave").addEventListener("click", async () => {
   if (!ovCtx) { ovStatusMsg("저장할 대상이 없습니다 — 항목을 먼저 선택하세요", true); return; }
