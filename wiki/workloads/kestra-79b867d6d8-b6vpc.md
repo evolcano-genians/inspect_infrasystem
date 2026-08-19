@@ -2,7 +2,7 @@
 created: '2026-08-18'
 entity: kestra-79b867d6d8-b6vpc
 kind: Pod
-last_inspected: '2026-08-18'
+last_inspected: '2026-08-19'
 namespace: nexus-shell
 type: workload
 ---
@@ -24,3 +24,4 @@ type: workload
 - 2026-08-18T23:28:20+00:00: phase=Running
 - 2026-08-18T23:28:47+00:00: phase=Running
 - 2026-08-18T23:29:05+00:00: 로그 조회함 (20000자, tail=1000)
+- 2026-08-19T00:27:04+00:00: phase=Running

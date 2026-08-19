@@ -8,6 +8,7 @@ tools:
   - k8s_get_pod
   - k8s_get_pod_logs
   - k8s_list_services
+  - k8s_list_endpoints
   - k8s_list_ingresses
   - k8s_list_custom
   - src_search

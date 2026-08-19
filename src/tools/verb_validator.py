@@ -65,7 +65,7 @@ _INT_ARGS: dict[str, tuple[int, int]] = {
     "max_rows": (1, 100_000),   # trino 조회 행 상한
     "timeout": (1, 1800),       # sandbox_bash 실행 타임아웃(초)
 }
-_BOOL_ARGS = frozenset({"previous"})
+_BOOL_ARGS = frozenset({"previous", "include_system"})
 # 소스 조회(source_reader) 전용 인자 — SourceHost 내부에서 재검증·shlex 인용된다.
 _SOURCE_PATH_ARGS = frozenset({"path"})
 _SOURCE_FREE_ARGS = frozenset({"pattern", "glob", "filename"})
@@ -84,7 +84,16 @@ _ENVNAME_ARGS = frozenset({"env"})              # shell_http 환경 키 (SHELL_<
 _ENVNAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 _TARGET_ARGS = frozenset({"target"})            # strix 대상 — _is_sandbox_target 이 실검증
 _TARGET_RE = re.compile(r"^[A-Za-z0-9._:/\-~]{1,300}$")
-_ENUM_ARGS: dict[str, frozenset[str]] = {"mode": frozenset({"", "quick", "standard", "deep"})}
+_ENUM_ARGS: dict[str, frozenset[str]] = {
+    "mode": frozenset({"", "quick", "standard", "deep"}),
+    # web_test: HTTP 메서드 — 대소문자 허용을 열어두고 정규화는 도구가 수행(GET/HEAD 로 강제).
+    "method": frozenset({"", "GET", "HEAD", "get", "head"}),
+}
+# ── 웹 테스팅 도구(web_test) 인자 ──────────────────────────────────────────
+# url 은 여기서 형식(http/https·셸/따옴표/공백 메타문자 배제·길이상한)만 본다.
+# 실 SSRF 인가는 도구 내부 게이트(_authorize_web_target)가 수행한다(strix/jira 와 동형).
+_URL_ARGS = frozenset({"url"})
+_URL_RE = re.compile(r"^https?://[A-Za-z0-9._~:/?#\[\]@!$&()*+,;=%\-]{3,2000}$", re.I)
 # 멀티 클러스터 비교(multicluster) 인자 — 실검증은 도구 내부(컨텍스트 dict·resource enum)
 _CONTEXT_ARGS = frozenset({"context"})          # 비교 대상 컨텍스트명 (kube context)
 _CONTEXT_RE = re.compile(r"^[A-Za-z0-9_.@:/\-]{1,253}$")
@@ -206,6 +215,10 @@ def _validate_arg(key: str, value: object) -> str | None:
     if key in _JIRA_KEY_ARGS:
         if not isinstance(value, str) or not _JIRA_KEY_RE.match(value):
             return f"인자 '{key}' 값 {value!r} 이 유효한 Jira 이슈 키/URL 이 아닙니다"
+        return None
+    if key in _URL_ARGS:
+        if not isinstance(value, str) or not _URL_RE.match(value):
+            return f"인자 '{key}' 값 {value!r} 이 유효한 http/https URL 이 아닙니다"
         return None
     return f"알 수 없는 인자 '{key}' (fail-closed 거부)"
 

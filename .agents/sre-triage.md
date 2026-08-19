@@ -9,9 +9,12 @@ tools:
   - k8s_list_deployments
   - k8s_get_deployment
   - k8s_rollout_history
+  - k8s_list_replicasets
   - k8s_list_statefulsets
   - k8s_list_daemonsets
   - k8s_list_jobs
+  - k8s_list_hpas
+  - k8s_list_pdbs
   - k8s_top_pods
   - k8s_list_namespaces
 ---

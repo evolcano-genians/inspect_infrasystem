@@ -2,7 +2,7 @@
 created: '2026-08-18'
 entity: psql-test
 kind: Pod
-last_inspected: '2026-08-18'
+last_inspected: '2026-08-19'
 namespace: nexus-shell
 type: workload
 ---
@@ -20,3 +20,4 @@ type: workload
 - 2026-08-18T22:08:07+00:00: phase=Succeeded
 - 2026-08-18T22:08:21+00:00: phase=Succeeded
 - 2026-08-18T23:28:20+00:00: phase=Succeeded
+- 2026-08-19T00:27:04+00:00: phase=Succeeded

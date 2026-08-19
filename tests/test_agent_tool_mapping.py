@@ -55,8 +55,11 @@ def _all_tool_names() -> set[str]:
     multi_tools = make_multicluster_tools({"ctx-a": WideStub(), "ctx-b": WideStub()})
     from src.tools.jira_reader import JiraConfig, make_jira_tools
     jira_tools = make_jira_tools(JiraConfig(base_url="https://jira.example.com", token="t"))
+    from src.tools.web_test import make_web_test_tools
+    web_tools = make_web_test_tools()
     return {t.name for t in [
         *k8s_tools, *src_tools, *sec_tools, *trino_tools, *shell_tools, *multi_tools, *jira_tools,
+        *web_tools,
     ]}
 
 
@@ -82,6 +85,11 @@ def test_specialist_agents_have_curated_subsets():
     assert "src_search" in agents["code-correlator"].tools
     assert "k8s_list_custom" in agents["network-debugger"].tools
     assert "src_search" not in agents["log-collector"].tools  # 로그 수집가는 소스 도구 불필요
+    # 신규 감사·라우팅 도구 스팟 체크
+    assert "k8s_list_role_bindings" in agents["security-auditor"].tools
+    assert "web_security_scan" in agents["security-auditor"].tools
+    assert "k8s_list_endpoints" in agents["network-debugger"].tools
+    assert "k8s_list_hpas" in agents["capacity-analyst"].tools
 
 
 class BindRecordingModel(BaseChatModel):
@@ -159,6 +167,13 @@ _REPRESENTATIVE_ARGS: dict[str, dict] = {
     "jira_search": {"jql": "project=CL ORDER BY updated DESC", "max_results": 20},
     "sandbox_bash": {"command": "echo hi", "timeout": 30},
     "sandbox_pentest_strix": {"target": "127.0.0.1", "instruction": "scan", "mode": "quick"},
+    # 웹 테스팅 도구 — url 형식·method enum 게이트 통과
+    "web_probe": {"url": "https://nexus.vmlab.test/", "method": "GET"},
+    "web_security_scan": {"url": "https://nexus.vmlab.test/"},
+    "web_links": {"url": "https://nexus.vmlab.test/"},
+    # 신규 k8s 감사 도구 — bool 인자(include_system) fail-closed 회귀 방지
+    "k8s_list_cluster_role_bindings": {"include_system": False},
+    "k8s_get_role": {"name": "admin", "namespace": ""},
 }
 
 
@@ -184,3 +199,7 @@ def test_extended_tool_args_still_reject_injection():
     assert not vv.validate_tool_call("sandbox_bash", {"command": "x", "evil": "1"}).allowed
     assert not vv.validate_tool_call("sandbox_pentest_strix", {"target": "a`b`"}).allowed
     assert not vv.validate_tool_call("shell_http_get", {"env": "v m"}).allowed  # 공백 불가
+    # 웹 테스팅: 비-http 스킴·변경 메서드·미등록 인자는 형식 게이트에서 거부
+    assert not vv.validate_tool_call("web_probe", {"url": "file:///etc/passwd"}).allowed
+    assert not vv.validate_tool_call("web_probe", {"url": "https://x.test/", "method": "POST"}).allowed
+    assert not vv.validate_tool_call("web_probe", {"url": "http://x.test/", "evil": "1"}).allowed

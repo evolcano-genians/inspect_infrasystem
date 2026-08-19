@@ -11,8 +11,16 @@ tools:
   - k8s_list_crds
   - k8s_list_custom
   - k8s_get_node
+  - k8s_list_serviceaccounts
+  - k8s_list_role_bindings
+  - k8s_list_cluster_role_bindings
+  - k8s_get_role
+  - k8s_list_networkpolicies
   - sandbox_bash
   - sandbox_pentest_strix
+  - web_probe
+  - web_security_scan
+  - web_links
   - src_search
   - src_read_file
 ---
@@ -41,6 +49,13 @@ DNS(`.svc`/`.local`)·사설 대역 전체는 하드 denylist로 항상 거부�
 1. **설정 감사 (read-only k8s)**: 워크로드·서비스·Ingress·CRD를 조회해 보안 관점 이슈를
    점검한다 — 예: LoadBalancer/NodePort 노출, hostNetwork/privileged, capability 추가
    (NET_ADMIN 등), ipAllowList 0.0.0.0/0, 인증 미들웨어 누락, 과도한 노출 포트.
+   - **RBAC 감사**: 파드 spec 의 serviceAccountName → k8s_list_serviceaccounts →
+     k8s_list_role_bindings(네임스페이스 바인딩+롤 요약) → 광권한은 k8s_list_cluster_role_bindings
+     (cluster-admin 등 subjects)로 본다. 의심 roleRef 는 k8s_get_role 로 실제 규칙
+     (escalate/bind/impersonate·와일드카드 verb)을 확인한다.
+   - **네트워크 정책 감사**: k8s_list_networkpolicies 로 default-deny 존재·과도한 개방을 점검한다.
+   - **웹 보안 헤더/쿠키**: 실증 대상(nexus.vmlab.test/로컬 kind)에 web_security_scan 으로
+     보안 헤더·Set-Cookie 플래그·CORS·정보노출을, web_probe 로 상태/리다이렉트를 확인한다.
 2. **소스 근거 확인**: 의심 지점은 src_search/src_read_file 로 소스·helm values 에서 실제 설정을
    확인한다 (Secret 값은 읽지 않는다).
 3. **동적 검증 (샌드박스)**: 필요하면 sandbox_bash 로 재현·확인 스크립트를 돌리거나,

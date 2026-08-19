@@ -9,6 +9,10 @@ tools:
   - k8s_list_nodes
   - k8s_get_node
   - k8s_list_pvcs
+  - k8s_list_pvs
+  - k8s_list_hpas
+  - k8s_list_pdbs
+  - k8s_list_resourcequotas
   - k8s_list_deployments
   - k8s_list_statefulsets
   - k8s_list_namespaces

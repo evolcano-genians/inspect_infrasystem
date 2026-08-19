@@ -2,7 +2,7 @@
 created: '2026-08-18'
 entity: bronze-ingestor-8585b4b86-fww67
 kind: Pod
-last_inspected: '2026-08-18'
+last_inspected: '2026-08-19'
 namespace: nexus-shell
 type: workload
 ---
@@ -31,3 +31,4 @@ type: workload
 - 2026-08-18T23:28:20+00:00: phase=Running, restarts=1
 - 2026-08-18T23:28:33+00:00: 로그 조회함 (20000자, tail=500)
 - 2026-08-18T23:28:33+00:00: 로그 조회함 (20000자, tail=300)
+- 2026-08-19T00:27:04+00:00: phase=Running, restarts=1

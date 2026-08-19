@@ -2,7 +2,7 @@
 created: '2026-08-18'
 entity: pg-client
 kind: Pod
-last_inspected: '2026-08-18'
+last_inspected: '2026-08-19'
 namespace: nexus-shell
 type: workload
 ---
@@ -22,3 +22,4 @@ type: workload
 - 2026-08-18T22:08:07+00:00: phase=Running, restarts=4
 - 2026-08-18T22:08:07+00:00: 리소스 사용량 — pg-client: cpu=0 mem=1224Ki
 - 2026-08-18T23:28:20+00:00: phase=Running, restarts=4
+- 2026-08-19T00:27:04+00:00: phase=Running, restarts=4

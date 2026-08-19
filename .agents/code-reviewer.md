@@ -18,6 +18,7 @@ tools:
   - k8s_list_services
   - k8s_list_custom
   - k8s_list_crds
+  - web_probe
 ---
 
 당신은 원격 개발서버(SSH)와 SVN/git에 있는 소스코드를 리뷰하는 코드 리뷰어다.

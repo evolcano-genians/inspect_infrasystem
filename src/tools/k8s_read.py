@@ -19,11 +19,14 @@ from kubernetes.client import (
     ApiextensionsV1Api,
     ApiException,
     AppsV1Api,
+    AutoscalingV2Api,
     BatchV1Api,
     Configuration,
     CoreV1Api,
     CustomObjectsApi,
     NetworkingV1Api,
+    PolicyV1Api,
+    RbacAuthorizationV1Api,
     VersionApi,
 )
 from langchain_core.tools import StructuredTool
@@ -62,7 +65,12 @@ class ReadOnlyK8sClient:
         self._list_namespaced_service = core.list_namespaced_service
         self._read_namespaced_service = core.read_namespaced_service
         self._read_namespaced_endpoints = core.read_namespaced_endpoints
+        self._list_namespaced_endpoints = core.list_namespaced_endpoints
         self._list_namespaced_config_map = core.list_namespaced_config_map
+        self._list_namespaced_service_account = core.list_namespaced_service_account
+        self._list_namespaced_resource_quota = core.list_namespaced_resource_quota
+        self._list_namespaced_limit_range = core.list_namespaced_limit_range
+        self._list_persistent_volume = core.list_persistent_volume
         self._list_node = core.list_node
         self._core_api_resources = core.get_api_resources
         self._list_namespaced_deployment = apps.list_namespaced_deployment
@@ -75,8 +83,20 @@ class ReadOnlyK8sClient:
         self._list_namespaced_job = batch.list_namespaced_job
         self._list_namespaced_pvc = core.list_namespaced_persistent_volume_claim
         self._list_namespaced_ingress = networking.list_namespaced_ingress
+        self._list_namespaced_network_policy = networking.list_namespaced_network_policy
         self._read_node = core.read_node
         self._list_crd = ApiextensionsV1Api(self._api).list_custom_resource_definition
+        # 오토스케일·중단예산·RBAC 은 별도 API 그룹 — 동일 GuardedApiClient(GET-only) 위에 생성.
+        autoscaling = AutoscalingV2Api(self._api)
+        self._list_namespaced_hpa = autoscaling.list_namespaced_horizontal_pod_autoscaler
+        policy = PolicyV1Api(self._api)
+        self._list_namespaced_pdb = policy.list_namespaced_pod_disruption_budget
+        rbac = RbacAuthorizationV1Api(self._api)
+        self._list_namespaced_role_binding = rbac.list_namespaced_role_binding
+        self._list_namespaced_role = rbac.list_namespaced_role
+        self._list_cluster_role_binding = rbac.list_cluster_role_binding
+        self._read_namespaced_role = rbac.read_namespaced_role
+        self._read_cluster_role = rbac.read_cluster_role
         self._version = VersionApi(self._api).get_code
         custom = CustomObjectsApi(self._api)
         self._list_namespaced_custom = custom.list_namespaced_custom_object
@@ -260,6 +280,255 @@ class ReadOnlyK8sClient:
                 "volume": pvc.spec.volume_name,
             })
         return out
+
+    def list_endpoints(self, namespace: str) -> list[dict]:
+        """서비스↔파드 라우팅 즉답 — 서비스별 ready/notReady 주소·대상 파드·포트.
+
+        기존 get_service 는 서비스 1개의 ready 주소만 보여주고 not_ready 는 누락됐다.
+        이 도구는 네임스페이스 전체 Endpoints 를 한 번에 조회해 '백엔드가 0개다/절반만
+        붙었다'를 바로 드러낸다.
+        """
+        out = []
+        for ep in self._list_namespaced_endpoints(namespace).items:
+            ports = []
+            ready, not_ready = [], []
+            for subset in ep.subsets or []:
+                for p in subset.ports or []:
+                    ports.append({"name": p.name, "port": p.port, "protocol": p.protocol})
+                for addr in subset.addresses or []:
+                    ref = addr.target_ref
+                    ready.append({"ip": addr.ip, "target": f"{ref.kind}/{ref.name}" if ref else None})
+                for addr in subset.not_ready_addresses or []:
+                    ref = addr.target_ref
+                    not_ready.append({"ip": addr.ip, "target": f"{ref.kind}/{ref.name}" if ref else None})
+            # 포트는 subset 마다 중복될 수 있어 dedup
+            uniq_ports = [dict(t) for t in {tuple(sorted(pp.items())) for pp in ports}]
+            out.append({
+                "service": ep.metadata.name,
+                "ports": uniq_ports,
+                "ready": ready,
+                "not_ready": not_ready,
+                "ready_count": len(ready),
+                "not_ready_count": len(not_ready),
+            })
+        return out
+
+    def list_replicasets(self, namespace: str, label_selector: str = "") -> list[dict]:
+        """롤아웃 디버깅 — 전체 RS 의 owner·revision·desired/ready/available 을 나열한다.
+
+        스턱 롤아웃(desired>0, ready=0)·고아 RS·파드 해시→소유 RS 역추적을 한 호출로 해결.
+        """
+        kwargs = {"label_selector": label_selector} if label_selector else {}
+        out = []
+        for rs in self._list_namespaced_replica_set(namespace, **kwargs).items:
+            owners = rs.metadata.owner_references or []
+            owner = None
+            if owners:
+                owner = {"kind": owners[0].kind, "name": owners[0].name}
+            st = rs.status
+            out.append({
+                "name": rs.metadata.name,
+                "namespace": rs.metadata.namespace,
+                "owner": owner,
+                "revision": int((rs.metadata.annotations or {}).get(_REVISION_ANNOTATION, 0)),
+                "desired": rs.spec.replicas or 0,
+                "ready": st.ready_replicas or 0,
+                "available": st.available_replicas or 0,
+                "current": st.replicas or 0,
+                "images": [c.image for c in rs.spec.template.spec.containers],
+            })
+        return out
+
+    def list_hpas(self, namespace: str) -> list[dict]:
+        """오토스케일 진단 — scaleTargetRef·min/max·current/desired·메트릭·조건.
+
+        조건의 FailedGetResourceMetric 은 metrics-server 장애 신호다. k8s_top_pods 와 짝으로
+        capacity 분석을 완성한다.
+        """
+        out = []
+        for h in self._list_namespaced_hpa(namespace).items:
+            spec, st = h.spec, h.status
+            ref = spec.scale_target_ref
+            metrics = []
+            for m in spec.metrics or []:
+                metrics.append({"type": m.type, "target": _hpa_metric_target(m)})
+            current_metrics = []
+            for m in (st.current_metrics or []):
+                current_metrics.append({"type": m.type, "current": _hpa_metric_current(m)})
+            out.append({
+                "name": h.metadata.name,
+                "namespace": h.metadata.namespace,
+                "scale_target": f"{ref.kind}/{ref.name}" if ref else None,
+                "min_replicas": spec.min_replicas,
+                "max_replicas": spec.max_replicas,
+                "current_replicas": st.current_replicas,
+                "desired_replicas": st.desired_replicas,
+                "metrics": metrics,
+                "current_metrics": current_metrics,
+                "last_scale_time": _ts(st.last_scale_time),
+                "conditions": [
+                    {"type": c.type, "status": c.status, "reason": c.reason}
+                    for c in (st.conditions or [])
+                ],
+            })
+        return out
+
+    def list_pdbs(self, namespace: str) -> list[dict]:
+        """중단 예산 진단 — disruptionsAllowed=0(노드 드레인·업그레이드 블로킹의 1순위 원인)
+        감지 + minAvailable/maxUnavailable vs currentHealthy/desiredHealthy 대조.
+        """
+        out = []
+        for p in self._list_namespaced_pdb(namespace).items:
+            spec, st = p.spec, p.status
+            out.append({
+                "name": p.metadata.name,
+                "namespace": p.metadata.namespace,
+                "min_available": str(spec.min_available) if spec.min_available is not None else None,
+                "max_unavailable": str(spec.max_unavailable) if spec.max_unavailable is not None else None,
+                "selector": (spec.selector.match_labels or {}) if spec.selector else {},
+                "current_healthy": getattr(st, "current_healthy", None),
+                "desired_healthy": getattr(st, "desired_healthy", None),
+                "expected_pods": getattr(st, "expected_pods", None),
+                "disruptions_allowed": getattr(st, "disruptions_allowed", None),
+            })
+        return out
+
+    def list_networkpolicies(self, namespace: str) -> list[dict]:
+        """'파드 A→B connection refused/timeout' 의 정책 원인 조사 — podSelector·policyTypes·
+        ingress/egress 피어 요약(규칙 수 캡). default-deny 존재 여부와 대상 파드를 즉답한다.
+        """
+        out = []
+        for np in self._list_namespaced_network_policy(namespace).items:
+            spec = np.spec
+            out.append({
+                "name": np.metadata.name,
+                "namespace": np.metadata.namespace,
+                "pod_selector": (spec.pod_selector.match_labels or {}) if spec.pod_selector else {},
+                "policy_types": list(spec.policy_types or []),
+                "ingress_rules": _netpol_rules(spec.ingress, "from"),
+                "egress_rules": _netpol_rules(spec.egress, "to"),
+            })
+        return out
+
+    def list_serviceaccounts(self, namespace: str) -> list[dict]:
+        """RBAC 추적의 출발점 — 이름·labels·automountServiceAccountToken 만 반환한다.
+
+        SA 본문의 secrets/imagePullSecrets 필드는 Secret '이름'이 실려 오므로 뷰에서 통째로
+        드랍한다(Secret 범위 밖 원칙).
+        """
+        out = []
+        for sa in self._list_namespaced_service_account(namespace).items:
+            out.append({
+                "name": sa.metadata.name,
+                "namespace": sa.metadata.namespace,
+                "labels": sa.metadata.labels or {},
+                "automount_service_account_token": sa.automount_service_account_token,
+            })
+        return out
+
+    def list_role_bindings(self, namespace: str) -> dict:
+        """네임스페이스 RBAC 감사 한 판 — bindings + roles 요약을 함께 반환한다.
+
+        '이 SA 가 이 네임스페이스에서 뭘 할 수 있나' 를 한 호출로. 읽기 전용이며 바인딩
+        생성/변경 심볼은 존재하지 않는다.
+        """
+        bindings = []
+        for rb in self._list_namespaced_role_binding(namespace).items:
+            bindings.append({
+                "name": rb.metadata.name,
+                "subjects": [
+                    {"kind": s.kind, "namespace": s.namespace, "name": s.name}
+                    for s in (rb.subjects or [])
+                ],
+                "role_ref": {"kind": rb.role_ref.kind, "name": rb.role_ref.name},
+            })
+        roles = []
+        for r in self._list_namespaced_role(namespace).items:
+            roles.append({
+                "name": r.metadata.name,
+                "rule_summary": _rbac_rule_summary(r.rules),
+            })
+        return {"namespace": namespace, "bindings": bindings, "roles": roles}
+
+    def list_cluster_role_bindings(self, include_system: bool = False) -> list[dict]:
+        """광권한 감사 — cluster 전역 바인딩과 subjects(특히 SA·Group) 를 나열한다.
+
+        system: 접두 바인딩(수백 개 노이즈)은 기본 제외하고 include_system=True 로만 전체.
+        """
+        out = []
+        for crb in self._list_cluster_role_binding().items:
+            name = crb.metadata.name or ""
+            if not include_system and name.startswith("system:"):
+                continue
+            out.append({
+                "name": name,
+                "subjects": [
+                    {"kind": s.kind, "namespace": s.namespace, "name": s.name}
+                    for s in (crb.subjects or [])
+                ],
+                "role_ref": {"kind": crb.role_ref.kind, "name": crb.role_ref.name},
+            })
+        return sorted(out, key=lambda x: x["name"])
+
+    def get_role(self, name: str, namespace: str = "") -> dict:
+        """바인딩에서 발견한 roleRef 의 실제 규칙(apiGroups×resources×verbs, resourceNames) 확인.
+
+        namespace 지정 시 Role, 생략 시 ClusterRole 을 읽는다 (둘 다 GET). escalate/bind/
+        impersonate 같은 위험 verb 는 '규칙 내용'으로 보고될 뿐 실행 경로가 없다.
+        """
+        if namespace:
+            role = self._read_namespaced_role(name, namespace)
+            kind = "Role"
+        else:
+            role = self._read_cluster_role(name)
+            kind = "ClusterRole"
+        return {
+            "kind": kind,
+            "name": role.metadata.name,
+            "namespace": namespace or None,
+            "rules": _rbac_rule_summary(role.rules),
+        }
+
+    def list_pvs(self) -> list[dict]:
+        """PVC Pending/Lost 원인 판별용 클러스터측 PV — phase·reclaimPolicy·claimRef·SC·capacity."""
+        out = []
+        for pv in self._list_persistent_volume().items:
+            spec, st = pv.spec, pv.status
+            claim = spec.claim_ref
+            out.append({
+                "name": pv.metadata.name,
+                "phase": st.phase,
+                "reclaim_policy": spec.persistent_volume_reclaim_policy,
+                "storage_class": spec.storage_class_name,
+                "capacity": (spec.capacity or {}).get("storage"),
+                "access_modes": spec.access_modes,
+                "claim": f"{claim.namespace}/{claim.name}" if claim else None,
+            })
+        return out
+
+    def list_resourcequotas(self, namespace: str) -> dict:
+        """'파드/PVC 생성이 왜 거부되나(exceeded quota)' 즉답 — quota hard vs used + LimitRange 기본값/상한."""
+        quotas = []
+        for q in self._list_namespaced_resource_quota(namespace).items:
+            st = q.status
+            quotas.append({
+                "name": q.metadata.name,
+                "hard": dict(st.hard or {}),
+                "used": dict(st.used or {}),
+            })
+        limit_ranges = []
+        for lr in self._list_namespaced_limit_range(namespace).items:
+            limits = []
+            for item in lr.spec.limits or []:
+                limits.append({
+                    "type": item.type,
+                    "default": dict(item.default or {}),
+                    "default_request": dict(item.default_request or {}),
+                    "max": dict(item.max or {}),
+                    "min": dict(item.min or {}),
+                })
+            limit_ranges.append({"name": lr.metadata.name, "limits": limits})
+        return {"namespace": namespace, "resource_quotas": quotas, "limit_ranges": limit_ranges}
 
     def get_node(self, name: str) -> dict:
         """노드 1개의 상세 (master/control-plane 조사 포함) — 조건·용량·시스템 정보."""
@@ -512,6 +781,67 @@ def _service_view(s) -> dict:
     }
 
 
+def _hpa_metric_target(m) -> dict:
+    """HPA 메트릭 spec 에서 target(utilization/averageValue) 을 값 유출 없이 요약한다."""
+    src = getattr(m, m.type.lower(), None) if m.type else None
+    tgt = getattr(src, "target", None) if src else None
+    if not tgt:
+        return {}
+    return {k: v for k, v in {
+        "type": tgt.type,
+        "average_utilization": tgt.average_utilization,
+        "average_value": tgt.average_value,
+        "value": tgt.value,
+    }.items() if v is not None}
+
+
+def _hpa_metric_current(m) -> dict:
+    src = getattr(m, m.type.lower(), None) if m.type else None
+    cur = getattr(src, "current", None) if src else None
+    if not cur:
+        return {}
+    return {k: v for k, v in {
+        "average_utilization": cur.average_utilization,
+        "average_value": cur.average_value,
+        "value": cur.value,
+    }.items() if v is not None}
+
+
+def _netpol_rules(rules, peer_field: str) -> list[dict]:
+    """NetworkPolicy ingress/egress 규칙을 피어·포트 요약으로 캡한다(규칙 수·피어 수 상한)."""
+    out = []
+    for rule in (rules or [])[:16]:
+        peers = []
+        for peer in (getattr(rule, peer_field) or [])[:12]:
+            entry = {}
+            if peer.pod_selector is not None:
+                entry["pod_selector"] = peer.pod_selector.match_labels or {}
+            if peer.namespace_selector is not None:
+                entry["namespace_selector"] = peer.namespace_selector.match_labels or {}
+            if peer.ip_block is not None:
+                entry["ip_block"] = {"cidr": peer.ip_block.cidr, "except": peer.ip_block._except or []}
+            peers.append(entry)
+        ports = [
+            {"port": str(p.port) if p.port is not None else None, "protocol": p.protocol}
+            for p in (rule.ports or [])[:16]
+        ]
+        out.append({"peers": peers, "peer_count": len(getattr(rule, peer_field) or []), "ports": ports})
+    return out
+
+
+def _rbac_rule_summary(rules) -> list[dict]:
+    """Role/ClusterRole 규칙을 verbs×resources×api_groups 요약으로(규칙 수 상한) 뽑는다."""
+    out = []
+    for r in (rules or [])[:64]:
+        out.append({
+            "verbs": list(r.verbs or []),
+            "resources": list(r.resources or []),
+            "api_groups": list(r.api_groups or []),
+            "resource_names": list(r.resource_names or []),
+        })
+    return out
+
+
 # ---------- LangChain 도구 정의 ----------
 
 def make_tools(k8s, audit: AuditLogger | None = None) -> list[StructuredTool]:
@@ -654,6 +984,73 @@ def make_tools(k8s, audit: AuditLogger | None = None) -> list[StructuredTool]:
             "k8s_list_pvcs", "list", "persistentvolumeclaims",
             "네임스페이스의 PVC(상태·스토리지클래스·용량)를 조회한다.",
             lambda namespace: k8s.list_pvcs(namespace),
+        ),
+        (
+            "k8s_list_endpoints", "list", "endpoints",
+            "네임스페이스의 Endpoints 를 조회한다 — 서비스별 ready/notReady 주소·대상 파드·포트. "
+            "'백엔드가 0개다/절반만 붙었다'(not_ready_count) 진단에 사용.",
+            lambda namespace: k8s.list_endpoints(namespace),
+        ),
+        (
+            "k8s_list_replicasets", "list", "replicasets",
+            "네임스페이스의 ReplicaSet 목록(owner·revision·desired/ready/available)을 조회한다. "
+            "스턱 롤아웃(desired>0, ready=0)·고아 RS·파드→소유 RS 역추적에 사용. "
+            "label_selector 선택 지원.",
+            lambda namespace, label_selector="": k8s.list_replicasets(namespace, label_selector),
+        ),
+        (
+            "k8s_list_hpas", "list", "horizontalpodautoscalers",
+            "네임스페이스의 HPA 목록(scaleTargetRef·min/max·current/desired·메트릭·조건)을 조회한다. "
+            "'replicas가 왜 튀나/왜 안 늘어나나'(ScalingLimited·FailedGetResourceMetric) 진단용.",
+            lambda namespace: k8s.list_hpas(namespace),
+        ),
+        (
+            "k8s_list_pdbs", "list", "poddisruptionbudgets",
+            "네임스페이스의 PodDisruptionBudget 목록을 조회한다 — disruptionsAllowed=0(노드 드레인 "
+            "블로킹)·minAvailable/maxUnavailable vs currentHealthy/desiredHealthy 대조.",
+            lambda namespace: k8s.list_pdbs(namespace),
+        ),
+        (
+            "k8s_list_networkpolicies", "list", "networkpolicies",
+            "네임스페이스의 NetworkPolicy 목록(podSelector·policyTypes·ingress/egress 피어 요약)을 "
+            "조회한다. 'A→B connection refused/timeout' 의 정책 차단 원인·default-deny 존재를 즉답.",
+            lambda namespace: k8s.list_networkpolicies(namespace),
+        ),
+        (
+            "k8s_list_serviceaccounts", "list", "serviceaccounts",
+            "네임스페이스의 ServiceAccount 목록(이름·labels·automountServiceAccountToken)을 조회한다. "
+            "RBAC 추적의 출발점. secrets/imagePullSecrets 필드는 뷰에서 드랍(Secret 범위 밖).",
+            lambda namespace: k8s.list_serviceaccounts(namespace),
+        ),
+        (
+            "k8s_list_role_bindings", "list", "rolebindings",
+            "네임스페이스의 RoleBinding + Role 을 함께 요약 조회한다 (bindings·roles). "
+            "'이 SA가 이 네임스페이스에서 뭘 할 수 있나' 를 한 호출로 감사. 읽기 전용.",
+            lambda namespace: k8s.list_role_bindings(namespace),
+        ),
+        (
+            "k8s_list_cluster_role_bindings", "list", "clusterrolebindings",
+            "클러스터 전역 ClusterRoleBinding 과 subjects(특히 SA·Group)를 나열한다 — 광권한 감사. "
+            "system: 접두 바인딩은 기본 제외, include_system=True 로만 전체(토큰 폭발 방지).",
+            lambda include_system=False: k8s.list_cluster_role_bindings(include_system),
+        ),
+        (
+            "k8s_get_role", "get", "roles",
+            "Role(namespace 지정) 또는 ClusterRole(namespace 생략)의 실제 규칙"
+            "(apiGroups×resources×verbs, resourceNames)을 조회한다 — 바인딩의 roleRef 역참조 확인용.",
+            lambda name, namespace="": k8s.get_role(name, namespace),
+        ),
+        (
+            "k8s_list_pvs", "list", "persistentvolumes",
+            "클러스터 스코프 PV 목록(phase·reclaimPolicy·claimRef·storageClass·capacity)을 조회한다. "
+            "PVC Pending/Lost 시 Released PV·SC 불일치 원인 판별에 사용.",
+            lambda: k8s.list_pvs(),
+        ),
+        (
+            "k8s_list_resourcequotas", "list", "resourcequotas",
+            "네임스페이스의 ResourceQuota(hard vs used) + LimitRange(기본값/상한)를 조회한다. "
+            "'생성이 왜 거부되나(exceeded quota)' 를 수치로 확정.",
+            lambda namespace: k8s.list_resourcequotas(namespace),
         ),
         (
             "k8s_list_nodes", "list", "nodes",
