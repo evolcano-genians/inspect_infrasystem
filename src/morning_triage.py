@@ -48,6 +48,7 @@ def scan_cluster(client) -> dict:
     """한 클러스터를 read-only 점검해 이슈·현재 스냅샷을 만든다."""
     issues: list[dict] = []
     snapshot: dict[str, dict] = {}   # "ns/name" -> {image, replicas}
+    rollouts: list[dict] = []        # 롤아웃 진행 중인 배포
 
     nss = _safe(client.list_namespaces)
     ns_names = [n.get("name") for n in nss] if isinstance(nss, list) else []
@@ -77,16 +78,30 @@ def scan_cluster(client) -> dict:
         deps = _safe(client.list_deployments, ns)
         if isinstance(deps, list):
             for d in deps:
-                key = f"{ns}/{d.get('name')}"
+                name = d.get("name")
+                key = f"{ns}/{name}"
                 img = (d.get("images") or [""])[0] if d.get("images") else d.get("image", "")
                 rep = d.get("replicas") or {}
                 snapshot[key] = {"image": img,
                                  "desired": rep.get("desired") if isinstance(rep, dict) else rep}
-                if isinstance(rep, dict) and rep.get("desired") and rep.get("ready") is not None \
-                        and rep["ready"] < rep["desired"]:
-                    issues.append({"sev": "med", "ns": ns, "obj": f"deploy/{d.get('name')}",
-                                   "kind": "레플리카 미충족",
-                                   "detail": f"ready {rep['ready']}/{rep['desired']}"})
+                if isinstance(rep, dict) and rep.get("desired"):
+                    des = rep["desired"]
+                    upd = rep.get("updated", des)
+                    avail = rep.get("available", des)
+                    ready = rep.get("ready", des)
+                    # 롤아웃 진행 중: 새 버전이 아직 전부 안 올라옴(updated<desired) 또는 가용 부족
+                    if upd < des or avail < des:
+                        reason = ""
+                        for c in (d.get("conditions") or []):
+                            if c.get("type") == "Progressing":
+                                reason = c.get("reason", "")
+                        rollouts.append({"ns": ns, "name": name,
+                                         "updated": upd, "desired": des, "available": avail,
+                                         "reason": reason})
+                    if ready is not None and ready < des:
+                        issues.append({"sev": "med", "ns": ns, "obj": f"deploy/{name}",
+                                       "kind": "레플리카 미충족",
+                                       "detail": f"ready {ready}/{des}"})
 
         events = _safe(client.list_events, ns)
         if isinstance(events, list):
@@ -99,7 +114,8 @@ def scan_cluster(client) -> dict:
                                    "kind": f"event:{reason}",
                                    "detail": (e.get("message") or "").strip()[:200]})
 
-    return {"issues": issues, "snapshot": snapshot, "namespaces": len(ns_names)}
+    return {"issues": issues, "snapshot": snapshot, "rollouts": rollouts,
+            "namespaces": len(ns_names)}
 
 
 def diff_snapshots(prev: dict, cur: dict) -> list[dict]:
@@ -212,13 +228,41 @@ def _lake_section(per_ctx: dict, lake_data: list[dict]) -> list[str]:
     return lines
 
 
+def _rollout_section(per_ctx: dict) -> list[str]:
+    """shell-app 롤아웃(진행 중) + 업데이트된 앱(이미지 변경) 섹션."""
+    lines: list[str] = []
+    rollouts, updates = [], []
+    for ctx, r in per_ctx.items():
+        for ro in r.get("rollouts", []):
+            rollouts.append((ctx, ro))
+        for ch in r.get("changes", []):
+            if ch["kind"] in ("이미지 변경", "신규 배포"):
+                updates.append((ctx, ch))
+    if not (rollouts or updates):
+        return lines
+    lines.append(f"\n*🚀 shell-app 업데이트·롤아웃* — 업데이트 {len(updates)} · 진행중 {len(rollouts)}")
+    for ctx, ch in updates[:12]:
+        label = "신규" if ch["kind"] == "신규 배포" else "업데이트"
+        lines.append(f"  ⬆️ [{ctx[:3]}] `{ch['obj']}` {label} {ch['detail']}")
+    if len(updates) > 12:
+        lines.append(f"  … 업데이트 외 {len(updates) - 12}건")
+    for ctx, ro in rollouts[:12]:
+        rs = f" ({ro['reason']})" if ro.get("reason") else ""
+        lines.append(f"  🔁 [{ctx[:3]}] `{ro['ns']}/{ro['name']}` 롤아웃 진행 "
+                     f"updated {ro['updated']}/{ro['desired']}, avail {ro['available']}{rs}")
+    if len(rollouts) > 12:
+        lines.append(f"  … 진행중 외 {len(rollouts) - 12}건")
+    return lines
+
+
 def build_message(per_ctx: dict, day: str, lake_data: list[dict] | None = None) -> str:
     """Slack용 텍스트를 만든다(이슈·변경 요약)."""
     lines = [f"*🌅 dev k8s 아침 트리아지 · {day}*"]
     total_issues = sum(len(v["issues"]) for v in per_ctx.values())
     if total_issues == 0:
         lines.append("✅ 확인이 필요한 이슈가 없습니다.")
-    # nexus-lake 전용 섹션을 맨 위에 (사용자 요청 — 매일 확인)
+    # shell-app 업데이트·롤아웃 (사용자 요청) → nexus-lake 순으로 맨 위에
+    lines += _rollout_section(per_ctx)
     lines += _lake_section(per_ctx, lake_data or [])
     for ctx, r in per_ctx.items():
         issues = r["issues"]
@@ -239,9 +283,10 @@ def build_message(per_ctx: dict, day: str, lake_data: list[dict] | None = None) 
 
 
 _SUMMARY_SYSTEM = """당신은 dev k8s 운영 조력자다. 아래는 오늘 아침 두 클러스터에서 자동 탐지된
-이슈·변경 목록이다. **오늘 사람이 먼저 확인·조치해야 할 것**을 우선순위로 3~6줄 한국어 불릿으로
-정리하라. 같은 근본원인(예: 한 노드/AZ 문제로 여러 파드 Pending)은 묶어라. 추측은 표시하고,
-비밀값은 옮기지 마라. 마크다운 없이 Slack 평문(불릿은 •)으로."""
+이슈·변경·앱 업데이트/롤아웃 목록이다. **오늘 사람이 먼저 확인·조치해야 할 것**을 우선순위로
+3~6줄 한국어 불릿으로 정리하라. 같은 근본원인(예: 한 노드/AZ 문제로 여러 파드 Pending)은 묶고,
+새로 업데이트된 shell-app이나 진행 중인 롤아웃이 있으면 '정상 완료됐는지 확인'을 한 줄 넣어라.
+추측은 표시하고, 비밀값은 옮기지 마라. 마크다운 없이 Slack 평문(불릿은 •)으로."""
 
 
 def summarize_priority(model, message: str) -> str:

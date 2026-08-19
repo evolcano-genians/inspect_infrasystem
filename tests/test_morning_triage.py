@@ -29,9 +29,13 @@ class FakeK8s:
 
     def list_deployments(self, ns):
         if ns == "nexus-shell":
-            return [{"name": "trino", "images": ["trinodb/trino:440"],
-                     "replicas": {"desired": 1, "ready": 1}}]
-        return [{"name": "web", "images": ["web:v1"], "replicas": {"desired": 2, "ready": 1}}]
+            # 롤아웃 진행 중: 새 버전 3개 중 1개만 갱신됨
+            return [{"name": "trino", "images": ["trinodb/trino:441"],
+                     "replicas": {"desired": 3, "ready": 2, "available": 2, "updated": 1},
+                     "conditions": [{"type": "Progressing", "status": "True",
+                                     "reason": "ReplicaSetUpdated"}]}]
+        return [{"name": "web", "images": ["web:v1"],
+                 "replicas": {"desired": 2, "ready": 1, "available": 1, "updated": 2}}]
 
     def list_events(self, ns, field_selector=""):
         return [{"type": "Warning", "reason": "FailedScheduling",
@@ -71,6 +75,27 @@ def test_lake_section_appears_for_lake_workloads():
     msg = build_message(per_ctx, "2026-08-19")
     assert "📦 nexus-lake" in msg
     assert "bronze-ingestor" in msg and "trino" in msg
+
+
+def test_scan_detects_rollout_in_progress():
+    r = scan_cluster(FakeK8s())
+    ro = {f"{x['ns']}/{x['name']}": x for x in r["rollouts"]}
+    assert "nexus-shell/trino" in ro                # updated 1/3 → 롤아웃 진행
+    assert ro["nexus-shell/trino"]["reason"] == "ReplicaSetUpdated"
+    assert "default/web" in ro                       # available 1/2 → 진행
+
+
+def test_rollout_section_renders_updates_and_progress():
+    per_ctx = {"aws-seoul-clouddev": {
+        "issues": [],
+        "rollouts": [{"ns": "nexus-shell", "name": "trino", "updated": 1, "desired": 3,
+                      "available": 2, "reason": "ReplicaSetUpdated"}],
+        "changes": [{"obj": "nexus-shell/shell-bff", "kind": "이미지 변경", "detail": "r3 → r4"}],
+    }}
+    msg = build_message(per_ctx, "2026-08-19")
+    assert "🚀 shell-app 업데이트·롤아웃" in msg
+    assert "shell-bff" in msg and "업데이트" in msg   # 이미지 변경 = 앱 업데이트
+    assert "롤아웃 진행" in msg and "1/3" in msg       # 진행 중
 
 
 def test_is_lake_keywords():
