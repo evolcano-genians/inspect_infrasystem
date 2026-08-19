@@ -146,6 +146,32 @@
   header .ctxUse .fill { height: 100%; width: 0%; background: var(--accent); transition: width .3s; }
   header .ctxUse .fill.warn { background: #d29922; }
   header .ctxUse .fill.high { background: var(--bad); }
+  /* ---- 헤더 반응형: 좁아져도 배지 글자가 줄바꿈으로 깨지지 않게 ---- */
+  header { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+  header::-webkit-scrollbar { height: 4px; }
+  header .badge, header select.badge, header button.badge {
+    white-space: nowrap; flex-shrink: 0;   /* 단어 중간 줄바꿈(read-\nonly) 방지 */
+  }
+  header select.badge { max-width: 190px; text-overflow: ellipsis; }
+  header .badge#thread, header .badge#sessTokens { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
+  /* 좁은 창: 정보 밀도가 낮은 배지부터 숨긴다 (핵심 = read-only·대상·모델·에이전트) */
+  @media (max-width: 1100px) {
+    header .badge#sessTokens { display: none; }
+  }
+  @media (max-width: 900px) {
+    header .badge#thread { display: none; }
+    header .ctxUse .bar { width: 36px; }
+  }
+  @media (max-width: 760px) {
+    header { gap: 6px; padding: 10px 12px; }
+    header .badge, header select.badge, header button.badge { font-size: 10.5px; padding: 2px 6px; }
+    aside { width: 200px; }
+  }
+  @media (max-width: 620px) {
+    aside { display: none; }        /* 아주 좁으면 사이드바를 접어 본문 폭 확보 */
+    .msg { max-width: 92%; }
+    .event { max-width: 92%; }
+  }
   .user { align-self: flex-end; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 4px; }
   .agent { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
   .agent pre, .agent code { background: var(--chip); border-radius: 6px; padding: 1px 5px; font-size: 13px; overflow-x: auto; }
@@ -179,7 +205,25 @@
     align-self: flex-start; font-size: 12.5px; color: var(--muted);
     background: var(--chip); border-radius: 10px; padding: 5px 10px;
     display: flex; align-items: center; gap: 6px; max-width: 78%;
+    white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
   }
+  /* 도구 호출: 접힌 요약(▶ 이름 + 짧은 힌트), 클릭 시 인자 전체 펼침 */
+  .event.toolCall { display: block; padding: 0; cursor: pointer; }
+  .event.toolCall > summary {
+    list-style: none; padding: 5px 10px; display: flex; gap: 8px; align-items: baseline;
+    white-space: nowrap; overflow: hidden;
+  }
+  .event.toolCall > summary::-webkit-details-marker { display: none; }
+  .event.toolCall > summary::before { content: "▸"; color: var(--muted); font-size: 10px; }
+  .event.toolCall[open] > summary::before { content: "▾"; }
+  .event.toolCall > summary b { color: var(--ink); font-weight: 600; flex-shrink: 0; }
+  .event.toolCall .argHint { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+  .event.toolCall > pre {
+    margin: 0; padding: 8px 10px; border-top: 1px solid var(--line); font-size: 12px;
+    white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; color: var(--ink);
+  }
+  .event.toolResult { flex-wrap: wrap; }
+  .event .resPreview { overflow-wrap: anywhere; }
   .event .st-허용 { color: var(--ok); font-weight: 600; }
   .event .st-거부 { color: var(--bad); font-weight: 600; }
   .event .st-오류 { color: var(--warn); font-weight: 600; }
@@ -435,14 +479,69 @@ function el(tag, cls, text) {
 }
 function addEvent(text) { return el("div", "event", text); }
 
+// 짧은 인자 힌트 — 긴 값은 잘라 요약(펼치면 전체가 보인다)
+function argHint(args) {
+  if (!args || typeof args !== "object") return "";
+  const parts = [];
+  for (const [k, v] of Object.entries(args)) {
+    if (v === "" || v === null || v === undefined) continue;
+    let s = typeof v === "string" ? v : JSON.stringify(v);
+    if (s.length > 24) s = s.slice(0, 24) + "…";
+    parts.push(`${k}=${s}`);
+    if (parts.length >= 2) break;
+  }
+  return parts.join(" ");
+}
+
+// 도구 호출을 접힌 형태로 — 일일이 나열하지 않고 클릭하면 인자 전체를 펼쳐 본다.
+function addToolCall(name, args) {
+  const det = document.createElement("details");
+  det.className = "event toolCall";
+  const sum = document.createElement("summary");
+  const nm = document.createElement("b"); nm.textContent = "▶ " + name;
+  const hint = document.createElement("span"); hint.className = "argHint"; hint.textContent = argHint(args);
+  sum.append(nm, hint);
+  const pre = document.createElement("pre");
+  pre.textContent = JSON.stringify(args || {}, null, 2);
+  det.append(sum, pre);
+  log.appendChild(det);
+  log.scrollTop = log.scrollHeight;
+  return det;
+}
+
+// 복원된 이전 조사의 도구 호출 묶음 — 한 줄 요약, 클릭하면 전체 목록
+function addToolBatch(calls) {
+  if (!calls.length) return;
+  const det = document.createElement("details");
+  det.className = "event toolCall";
+  const sum = document.createElement("summary");
+  const nm = document.createElement("b");
+  nm.textContent = "🛠 도구 " + calls.length + "회";
+  const hint = document.createElement("span");
+  hint.className = "argHint";
+  const names = [...new Set(calls.map(c => c.name))];
+  hint.textContent = names.slice(0, 3).join(", ") + (names.length > 3 ? ` 외 ${names.length - 3}종` : "");
+  sum.append(nm, hint);
+  const pre = document.createElement("pre");
+  pre.textContent = calls.map(c => `▶ ${c.name} ${JSON.stringify(c.args || {})}`).join("\n");
+  det.append(sum, pre);
+  log.appendChild(det);
+  log.scrollTop = log.scrollHeight;
+}
+
 function addToolResult(name, status, preview) {
-  const node = el("div", "event");
+  const node = el("div", "event toolResult");
   const badge = document.createElement("span");
   badge.className = "st-" + status;
   badge.textContent = status;
   node.append("🛠 " + name + " → ");
   node.appendChild(badge);
-  if (status !== "허용" && preview) node.append(" · " + preview.slice(0, 160));
+  if (status !== "허용" && preview) {
+    const p = document.createElement("span");
+    p.className = "resPreview";
+    p.textContent = " · " + preview.slice(0, 160);
+    node.appendChild(p);
+  }
   log.scrollTop = log.scrollHeight;
 }
 
@@ -1105,12 +1204,16 @@ async function loadHistory() {
     const res = await fetch("/api/sessions/" + threadId + "/history");
     const data = await res.json();
     if (data.meta && data.meta.agent) setAgent(data.meta.agent);
+    let msgCount = 0;
     for (const turn of data.turns || []) {
-      if (turn.role === "user") el("div", "msg user", turn.content);
-      else renderAgent(turn.content);
+      if (turn.role === "user") { el("div", "msg user", turn.content); msgCount++; }
+      else if (turn.role === "tools") {
+        // 이전 조사의 도구 호출들 — 접힌 묶음 하나로(클릭 시 펼침)
+        addToolBatch(turn.calls || []);
+      } else { renderAgent(turn.content); msgCount++; }
     }
-    if ((data.turns || []).length)
-      addEvent("↺ 이전 대화 " + data.turns.length + "개 메시지를 복원했습니다 (context 유지됨)");
+    if (msgCount)
+      addEvent("↺ 이전 대화 " + msgCount + "개 메시지를 복원했습니다 (도구 활동 포함 · context 유지됨)");
   } catch (e) { /* 이력 없음 — 무시 */ }
 }
 
@@ -1225,7 +1328,7 @@ function handleEvent(ev) {
       if (currentStatus) currentStatus.set("🧠 계획 수립 중… (과거 관찰 반영)");
       break;
     case "tool_call":
-      addEvent("▶ " + ev.name + " " + JSON.stringify(ev.args));
+      addToolCall(ev.name, ev.args);
       if (currentStatus) currentStatus.tool(ev.name);
       break;
     case "tool_result":

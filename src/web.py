@@ -617,8 +617,15 @@ def make_app(
         for msg in (state.values or {}).get("messages") or []:
             if isinstance(msg, HumanMessage):
                 turns.append({"role": "user", "content": str(msg.content)})
-            elif isinstance(msg, AIMessage) and not msg.tool_calls and str(msg.content).strip():
-                turns.append({"role": "assistant", "content": str(msg.content)})
+            elif isinstance(msg, AIMessage):
+                # 이전 대화의 도구 활동도 접힌 형태로 복원할 수 있게 함께 내려준다.
+                if msg.tool_calls:
+                    turns.append({"role": "tools", "calls": [
+                        {"name": tc.get("name", "?"), "args": tc.get("args") or {}}
+                        for tc in msg.tool_calls
+                    ]})
+                if str(msg.content).strip():
+                    turns.append({"role": "assistant", "content": str(msg.content)})
         meta = sessions.get(thread_id)
         return JSONResponse(
             {"thread_id": thread_id, "turns": turns, "meta": meta.to_dict() if meta else None}
