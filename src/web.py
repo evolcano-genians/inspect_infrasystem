@@ -57,10 +57,31 @@ class ChatRequest(BaseModel):
     agent: str = Field(default="", max_length=64)
     reasoning: str = Field(default="", max_length=16)  # low|medium|high (codex-oauth 전용)
     context: str = Field(default="", max_length=64)    # 조사 대상 클러스터 컨텍스트
+    # 멀티모달 입력: data:image/...;base64,... URL 목록 (최대 4장, 각 ~7MB)
+    images: list[str] = Field(default_factory=list, max_length=4)
 
 
 _WIKI_PATH_RE = re.compile(r"^[A-Za-z0-9._\-/]{1,200}\.md$")
 MAX_WIKI_PAGE_CHARS = 200_000
+_IMAGE_DATA_URL_RE = re.compile(r"^data:image/(png|jpeg|jpg|gif|webp);base64,[A-Za-z0-9+/=\s]+$")
+
+
+def _message_text(content) -> tuple[str, int]:
+    """메시지 content(문자열 또는 멀티모달 블록 리스트)에서 (표시 텍스트, 이미지 수)를 뽑는다."""
+    if isinstance(content, str):
+        return content, 0
+    if isinstance(content, list):
+        texts, images = [], 0
+        for b in content:
+            if isinstance(b, str):
+                texts.append(b)
+            elif isinstance(b, dict):
+                if b.get("type") == "text":
+                    texts.append(b.get("text", ""))
+                elif b.get("type") in ("image_url", "image"):
+                    images += 1
+        return "\n".join(t for t in texts if t), images
+    return str(content), 0
 
 
 class WikiSaveRequest(BaseModel):
@@ -616,7 +637,8 @@ def make_app(
         turns: list[dict] = []
         for msg in (state.values or {}).get("messages") or []:
             if isinstance(msg, HumanMessage):
-                turns.append({"role": "user", "content": str(msg.content)})
+                text, n_img = _message_text(msg.content)
+                turns.append({"role": "user", "content": text, "images": n_img})
             elif isinstance(msg, AIMessage):
                 # 이전 대화의 도구 활동도 접힌 형태로 복원할 수 있게 함께 내려준다.
                 if msg.tool_calls:
@@ -651,7 +673,7 @@ def make_app(
             transcript: list[str] = []
             for msg in messages:
                 if isinstance(msg, HumanMessage):
-                    transcript.append("[사용자] " + str(msg.content)[:2000])
+                    transcript.append("[사용자] " + _message_text(msg.content)[0][:2000])
                 elif isinstance(msg, AIMessage) and str(msg.content).strip():
                     transcript.append("[에이전트] " + str(msg.content)[:3000])
             joined = "\n\n".join(transcript)[-40_000:]
@@ -711,6 +733,21 @@ def make_app(
                 iter([_sse({"type": "error", "message": f"에이전트 '{req.agent}' 없음"})]),
                 media_type="text/event-stream",
             )
+        # 이미지 입력 검증 (멀티모달) — data:image/{png,jpeg,gif,webp};base64,...만 허용
+        valid_images: list[str] = []
+        for img in (req.images or [])[:4]:
+            if not isinstance(img, str) or not _IMAGE_DATA_URL_RE.match(img):
+                return StreamingResponse(
+                    iter([_sse({"type": "error",
+                                "message": "이미지는 data:image/(png|jpeg|gif|webp);base64 형식만 가능합니다"})]),
+                    media_type="text/event-stream",
+                )
+            if len(img) > 10_000_000:  # base64 팽창 포함 ~7.5MB 원본 상한
+                return StreamingResponse(
+                    iter([_sse({"type": "error", "message": "이미지 한 장이 너무 큽니다(최대 ~7MB)"})]),
+                    media_type="text/event-stream",
+                )
+            valid_images.append(img)
         # 추론 모드 선택 (codex-oauth 전용). 금지값(minimal/xhigh 등)은 graphs에 없어 거부된다.
         effort = (req.reasoning or "").strip().lower()
         if graphs:
@@ -749,11 +786,21 @@ def make_app(
                 )
         sessions.touch(thread, title_candidate=question, agent=agent.name)
 
+        # 이미지가 있으면 멀티모달 HumanMessage(content 블록 리스트)로 구성한다.
+        # (llm._install_multimodal_patch 가 이 블록을 Codex input_image 로 변환한다)
+        if valid_images:
+            human_content: list = [{"type": "text", "text": question}]
+            for img in valid_images:
+                human_content.append({"type": "image_url", "image_url": {"url": img}})
+            human_msg: HumanMessage = HumanMessage(content=human_content)
+        else:
+            human_msg = HumanMessage(question)
+
         def stream():
             payload = {
                 "question": question,
                 "session_id": thread,
-                "messages": [HumanMessage(question)],
+                "messages": [human_msg],
                 "agent_instructions": agent.instructions,
                 "agent_name": agent.name,
                 "agent_tools": list(agent.tools),

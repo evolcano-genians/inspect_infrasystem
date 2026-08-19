@@ -186,6 +186,95 @@ def make_model(settings: Settings) -> BaseChatModel:
     )
 
 
+_MULTIMODAL_PATCHED = False
+
+
+def _install_multimodal_patch() -> None:
+    """어댑터의 입력 변환기가 이미지(멀티모달) 메시지를 처리하도록 보정한다.
+
+    langchain-codex-oauth v1.0.0 의 ``_to_input_items`` 는 모든 메시지 content 를
+    ``str()`` 로 뭉개 텍스트 블록만 만든다 — HumanMessage.content 가 블록 리스트
+    (예: [{"type":"text"}, {"type":"image_url"}])면 이미지가 문자열로 깨진다.
+    Codex/Responses 백엔드는 ``input_image`` 블록을 지원하므로(실측: gpt-5.6-sol이
+    이미지 색상을 정확히 인식), human 메시지의 리스트 content 를 input_text/input_image
+    블록으로 변환하는 버전으로 교체한다. 나머지 처리는 원본과 동일하다. site-packages 는
+    건드리지 않고 모듈 함수만 우리 쪽에서 감싼다(기존 complete_with_response 보정과 동일 원칙).
+    """
+    global _MULTIMODAL_PATCHED
+    if _MULTIMODAL_PATCHED:
+        return
+    import langchain_codex_oauth.chat_models as cm
+    from langchain_core.messages import ToolMessage
+
+    def _human_blocks(content) -> list[dict]:
+        """HumanMessage.content(list) → Responses input 블록. 이미지 없으면 빈 리스트."""
+        blocks: list[dict] = []
+        for b in content:
+            if isinstance(b, str) and b:
+                blocks.append({"type": "input_text", "text": b})
+            elif isinstance(b, dict):
+                t = b.get("type")
+                if t == "text":
+                    blocks.append({"type": "input_text", "text": b.get("text", "")})
+                elif t in ("image_url", "image"):
+                    url = b.get("image_url") or b.get("url") or b.get("image")
+                    if isinstance(url, dict):
+                        url = url.get("url", "")
+                    if isinstance(url, str) and url:
+                        blocks.append({"type": "input_image", "image_url": url})
+        return blocks
+
+    def _to_input_items(messages, *, system_prompt_mode="default"):
+        items: list = []
+        mode = system_prompt_mode
+        if mode == "strict":
+            system_texts = cm._extract_system_texts(messages)
+            if system_texts:
+                items.append(cm.message_item(
+                    "developer", cm._format_system_prompt_strict(system_texts)))
+            to_process = [m for m in messages if m.type not in {"system", "developer"}]
+        elif mode == "disabled":
+            to_process = [m for m in messages if m.type not in {"system", "developer"}]
+        else:
+            to_process = list(messages)
+
+        for message in to_process:
+            if mode == "default" and message.type in {"system", "developer"}:
+                items.append(cm.message_item("developer", str(message.content)))
+                continue
+            if message.type in {"human", "user"}:
+                if isinstance(message.content, list):
+                    blocks = _human_blocks(message.content)
+                    if blocks:
+                        items.append({"type": "message", "role": "user", "content": blocks})
+                        continue
+                items.append(cm.message_item("user", str(message.content)))
+                continue
+            if isinstance(message, ToolMessage) or message.type == "tool":
+                tool_call_id = getattr(message, "tool_call_id", None)
+                if isinstance(tool_call_id, str) and tool_call_id:
+                    items.append(cm.function_call_output_item(tool_call_id, message.content))
+                continue
+            assistant_text = str(message.content) if message.content else ""
+            if assistant_text:
+                items.append(cm.message_item("assistant", assistant_text))
+            tool_calls = getattr(message, "tool_calls", None)
+            if isinstance(tool_calls, list):
+                for tc in cm._ensure_tool_call_ids(tool_calls):
+                    name, args, call_id = tc.get("name"), tc.get("args"), tc.get("id")
+                    if not isinstance(name, str) or not name:
+                        continue
+                    if not isinstance(call_id, str) or not call_id:
+                        continue
+                    if not isinstance(args, dict):
+                        args = {}
+                    items.append(cm.function_call_item(call_id=call_id, name=name, args=args))
+        return items
+
+    cm._to_input_items = _to_input_items
+    _MULTIMODAL_PATCHED = True
+
+
 def make_codex_model(model_name: str, reasoning_effort: str = "medium") -> BaseChatModel:
     """백엔드 호환 보정이 적용된 ChatCodexOAuth 를 만든다.
 
@@ -218,6 +307,8 @@ def make_codex_model(model_name: str, reasoning_effort: str = "medium") -> BaseC
         raise ValueError(
             f"알 수 없는 추론 단계 '{effort}' — 허용값: {ALLOWED_REASONING_EFFORTS}"
         )
+
+    _install_multimodal_patch()
 
     class _CompatCodexClient(CodexClient):
         def complete_with_response(self, **kwargs) -> CompletionResult:
