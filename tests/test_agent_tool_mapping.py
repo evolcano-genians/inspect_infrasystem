@@ -158,6 +158,8 @@ _REPRESENTATIVE_ARGS: dict[str, dict] = {
     "trino_sample": {"catalog": "delta", "schema": "silver", "table": "events", "limit": 20},
     "trino_count": {"catalog": "delta", "schema": "silver", "table": "events"},
     "trino_profile": {"catalog": "delta", "schema": "silver", "table": "events", "column": "user_id"},
+    "trino_table_profile": {"catalog": "delta", "schema": "silver", "table": "events"},
+    "trino_freshness": {"catalog": "delta", "schema": "silver"},
     "k8s_list_contexts": {},
     "k8s_compare": {"resource": "deployments", "namespace": "nexus-lake"},
     "k8s_read_at": {"context": "aws-seoul-clouddev", "resource": "pods", "namespace": "default"},

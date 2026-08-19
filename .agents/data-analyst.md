@@ -9,6 +9,8 @@ tools:
   - trino_sample
   - trino_count
   - trino_profile
+  - trino_table_profile
+  - trino_freshness
   - trino_query
   - k8s_list_pods
   - k8s_get_pod_logs

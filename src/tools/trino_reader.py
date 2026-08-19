@@ -205,9 +205,105 @@ def make_trino_tools(config: TrinoConfig, audit=None) -> list:
         )
         return _run("trino_profile", sql)
 
+    def _rows(sql: str, max_rows: int = 1000):
+        """내부용: 포맷 문자열이 아니라 원시 결과 dict를 돌려준다(동적 SQL 조립용)."""
+        return client.query(sql, max_rows=max_rows)
+
+    # 정렬(min/max) 가능한 타입만 — map/array/row/json/varbinary 는 제외
+    def _orderable(coltype: str) -> bool:
+        t = (coltype or "").lower()
+        return not any(t.startswith(x) for x in ("map", "array", "row", "json", "varbinary", "hyperloglog"))
+
+    def _table_profile(catalog, schema, table, max_cols=40):
+        """테이블의 **모든 컬럼**을 한 번에 프로파일링한다(널·고유값·최소·최대)."""
+        fq = _fqtn(catalog, schema, table)
+        try:
+            desc = _rows(f"DESCRIBE {fq}")
+        except TrinoQueryError as exc:
+            return f"[거부됨 · read-only SQL 정책] {exc}"
+        except Exception as exc:
+            return f"[Trino 조회 오류] {type(exc).__name__}: {exc}"
+        cols = [(str(r[0]), str(r[1])) for r in desc.get("rows", [])][:max_cols]
+        if not cols:
+            return "(컬럼 없음)"
+        # 한 번의 스캔으로 컬럼별 집계 — 식별자는 _ident 검증 후 이중따옴표로 감싼다
+        parts = ["COUNT(*) AS total"]
+        for name, ctype in cols:
+            c = _ident(name)
+            parts.append(f'COUNT("{c}") AS "{c}__nn"')
+            parts.append(f'COUNT(DISTINCT "{c}") AS "{c}__d"')
+            if _orderable(ctype):
+                parts.append(f'CAST(MIN("{c}") AS VARCHAR) AS "{c}__min"')
+                parts.append(f'CAST(MAX("{c}") AS VARCHAR) AS "{c}__max"')
+        try:
+            res = _rows(f"SELECT {', '.join(parts)} FROM {fq}", max_rows=1)
+        except TrinoQueryError as exc:
+            return f"[거부됨 · read-only SQL 정책] {exc}"
+        except Exception as exc:
+            return f"[Trino 조회 오류] {type(exc).__name__}: {exc}"
+        row = (res.get("rows") or [[]])[0]
+        vals = dict(zip(res.get("columns", []), row))
+        total = vals.get("total", 0) or 0
+        lines = [f"# {schema}.{table} 프로파일 · 총 {total:,}행 · 컬럼 {len(cols)}개",
+                 "| 컬럼 | 타입 | 널(%) | 고유값 | 최소 | 최대 |",
+                 "|---|---|---|---|---|---|"]
+        for name, ctype in cols:
+            c = _ident(name)
+            nn = vals.get(f"{c}__nn", 0) or 0
+            nulls = total - nn
+            pct = f"{(nulls / total * 100):.1f}%" if total else "-"
+            d = vals.get(f"{c}__d", "-")
+            mn = str(vals.get(f"{c}__min", ""))[:24] if _orderable(ctype) else "-"
+            mx = str(vals.get(f"{c}__max", ""))[:24] if _orderable(ctype) else "-"
+            lines.append(f"| {name} | {ctype[:18]} | {pct} | {d} | {mn} | {mx} |")
+        return "\n".join(lines)
+
+    _TIME_HINTS = ("time", "_at", "date", "ts", "timestamp", "created", "updated", "ingested")
+
+    def _freshness(catalog, schema, max_tables=40):
+        """스키마의 각 테이블에서 시각 컬럼의 최신값을 찾아 데이터 신선도를 점검한다."""
+        try:
+            tbls = _rows(f"SHOW TABLES FROM {_ident(catalog)}.{_ident(schema)}")
+        except TrinoQueryError as exc:
+            return f"[거부됨 · read-only SQL 정책] {exc}"
+        except Exception as exc:
+            return f"[Trino 조회 오류] {type(exc).__name__}: {exc}"
+        names = [str(r[0]) for r in tbls.get("rows", [])][:max_tables]
+        lines = [f"# {catalog}.{schema} 신선도 ({len(names)}개 테이블)",
+                 "| 테이블 | 시각 컬럼 | 최신값 | 경과 |", "|---|---|---|---|"]
+        for t in names:
+            fq = f"{_ident(catalog)}.{_ident(schema)}.{_ident(t)}"
+            try:
+                desc = _rows(f"DESCRIBE {fq}")
+            except Exception:
+                lines.append(f"| {t} | - | (describe 실패) | - |"); continue
+            tcol, tctype = "", ""
+            for r in desc.get("rows", []):
+                nm, ct = str(r[0]), str(r[1]).lower()
+                if ct.startswith(("timestamp", "date")) or any(h in nm.lower() for h in _TIME_HINTS):
+                    tcol, tctype = nm, ct
+                    if ct.startswith(("timestamp", "date")):  # 타입 매칭 우선
+                        break
+            if not tcol:
+                lines.append(f"| {t} | (없음) | - | - |"); continue
+            c = _ident(tcol)
+            is_temporal = tctype.startswith(("timestamp", "date"))
+            age = (f', date_diff(\'hour\', MAX("{c}"), current_timestamp) AS age_h'
+                   if is_temporal else "")
+            try:
+                res = _rows(f'SELECT CAST(MAX("{c}") AS VARCHAR) AS latest{age} FROM {fq}', max_rows=1)
+                row = (res.get("rows") or [[None]])[0]
+                latest = str(row[0])[:24] if row and row[0] is not None else "(null)"
+                agestr = (f"{row[1]}시간 전" if is_temporal and len(row) > 1 and row[1] is not None else "-")
+            except Exception as exc:
+                latest, agestr = f"(오류: {type(exc).__name__})", "-"
+            lines.append(f"| {t} | {tcol} | {latest} | {agestr} |")
+        return "\n".join(lines)
+
     # 도구 등록 (모두 read-only)
     for name in ("trino_query", "trino_catalogs", "trino_schemas", "trino_tables",
-                 "trino_describe", "trino_sample", "trino_count", "trino_profile"):
+                 "trino_describe", "trino_sample", "trino_count", "trino_profile",
+                 "trino_table_profile", "trino_freshness"):
         verb_validator.register_tool(name, "sql-read", "trino")
 
     tools = [
@@ -249,6 +345,19 @@ def make_trino_tools(config: TrinoConfig, audit=None) -> list:
             func=_profile, name="trino_profile",
             description="한 컬럼을 프로파일링한다: 총건수·비널·널·고유값 수·최소·최대를 한 번에. "
                         "데이터 품질(널 비율·카디널리티)·이상치 파악에 사용. column 인자로 대상 컬럼 지정.",
+        ),
+        StructuredTool.from_function(
+            func=lambda catalog, schema, table: _table_profile(catalog, schema, table),
+            name="trino_table_profile",
+            description="테이블의 **모든 컬럼**을 한 번의 스캔으로 프로파일링한다 — 컬럼별 널 비율·"
+                        "고유값 수·최소·최대를 표로. 스키마 전체 데이터 품질을 빠르게 파악할 때 "
+                        "(컬럼마다 trino_profile 반복 대신) 이 도구를 우선 써라.",
+        ),
+        StructuredTool.from_function(
+            func=lambda catalog, schema: _freshness(catalog, schema),
+            name="trino_freshness",
+            description="스키마의 각 테이블에서 시각 컬럼의 최신값·경과시간을 찾아 **데이터 신선도**를 "
+                        "점검한다. '적재가 멈췄나/지연되나'(bronze·silver 파이프라인 건강)를 한눈에.",
         ),
     ]
     return tools

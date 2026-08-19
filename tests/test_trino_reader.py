@@ -128,7 +128,7 @@ def test_tools_registered_readonly():
     names = {t.name for t in tools}
     assert names == {
         "trino_query", "trino_catalogs", "trino_schemas", "trino_tables", "trino_describe",
-        "trino_sample", "trino_count", "trino_profile",  # nexus-lake 분석 편의 도구
+        "trino_sample", "trino_count", "trino_profile", "trino_table_profile", "trino_freshness",
     }
     reg = verb_validator.registered_tools()
     for n in names:
