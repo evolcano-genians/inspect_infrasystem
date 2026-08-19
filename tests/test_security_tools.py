@@ -18,10 +18,24 @@ from src.sandbox.security_tools import (
     _authorize_strix_target,
     _build_strix_env,
     _is_sandbox_target,
+    _prepare_strix_home,
     build_strix_policy,
     make_security_tools,
 )
 
+
+def test_strix_home_has_no_escaping_symlink(tmp_path):
+    """격리 HOME 에 실제 홈으로 나가는 심볼릭 링크(.strix 등)가 없어야 한다.
+
+    과거 구현은 home/.strix → ~/.strix 링크를 만들어 `..` 탈출과 cli-config.json env
+    우회를 허용했다(적대검증 확인). 링크 제거를 회귀 방지로 고정한다.
+    """
+    home = _prepare_strix_home(tmp_path / "pentest")
+    assert home.is_dir() and (home / "tmp").is_dir()
+    # 어떤 항목도 격리 트리 밖으로 나가는 심볼릭 링크가 아니어야 한다
+    for child in home.iterdir():
+        assert not child.is_symlink(), f"격리 탈출 심볼릭 링크 발견: {child}"
+    assert not (home / ".strix").exists()  # 실제 ~/.strix 링크 부재
 
 # ---------- BashSandbox 구조적 안전장치 ----------
 

@@ -34,11 +34,15 @@
 - STRIX_ENABLED=1 (+ strix CLI) → sandbox_pentest_strix 도구
 - STRIX_ALLOWED_TARGETS → 랩 환경에 맞춰 허용목록 치환(하드 denylist 는 못 푼다)
 
-잔여 위험(설계상 남는 것): 호스트 파일시스템 절대경로 읽기는 여전히 가능(HOME/cwd 격리는
-기본 탐색 경로만 차단); DNS TOCTOU(사전 검증 후 strix 가 다시 해석); 호스트 라우팅 자체는
-불변(설정에 드러나지 않은 VPN 은 인터록이 못 잡지만, 대상 게이트+하드 denylist 가 실 클러스터
-IP 는 차단); strix 가 띄우는 자체 컨테이너의 네트워크·부수 스캔은 통제 밖; 인가된 VM 내부
-에서의 횡적 이동. 근본 해소는 전용 저권한 UID 또는 전용 VM 실행이며 이번 범위 밖이다.
+잔여 위험(설계상 남는 것): **★ Docker 소켓 = 호스트 root 등가.** strix 는 컨테이너를 띄우려
+호스트 도커 데몬(/var/run/docker.sock)에 접근하며, 이는 사실상 호스트 root 권한이라 env/HOME
+격리를 이론적으로 우회할 수 있다(적대검증 확인) — 즉 이 도구는 **strix 를 신뢰할 수 있는 도구로
+전제**하며, strix 가 도커 소켓을 악용하지 않는다는 가정 위에 선다. 그 외: 호스트 파일시스템
+절대경로 읽기 가능(HOME/cwd 격리는 기본 탐색 경로만 차단); DNS TOCTOU(사전 검증 후 재해석);
+호스트 라우팅 불변(설정에 드러나지 않은 VPN 은 인터록이 못 잡지만, 대상 게이트+하드 denylist 가
+실 클러스터 IP 는 차단); strix 자체 컨테이너의 네트워크·부수 스캔은 통제 밖; 인가된 VM 내부
+횡적 이동. 근본 해소는 strix 자체를 rootless/전용 저권한 UID 또는 **격리된 전용 VM 에서 실행**
+하는 것이며 이번 범위 밖이다 — 따라서 STRIX_ENABLED 는 **버릴 수 있는 랩 환경에서만** 켤 것.
 """
 
 from __future__ import annotations
@@ -442,20 +446,21 @@ def _build_strix_env(home: Path, source: dict | None = None) -> dict[str, str]:
 
 
 def _prepare_strix_home(run_dir: Path) -> Path:
-    """strix 전용 HOME 트리를 만든다. `.kube/.aws/.ssh` 가 경로로 존재하지 않는 게 핵심."""
+    """strix 전용 HOME 트리를 만든다. `.kube/.aws/.ssh` 가 경로로 존재하지 않는 게 핵심.
+
+    **의도적으로 실제 ~/.strix 를 심볼릭 링크하지 않는다.** 과거 구현은 `home/.strix →
+    ~/.strix` 링크를 만들었으나, 이는 (1) `$HOME/.strix/../.aws` 처럼 `..` 로 실제 홈을
+    빠져나가는 한 홉 통로가 되고, (2) 실제 `~/.strix/cli-config.json` 의 `env` 맵이
+    _build_strix_env 화이트리스트를 우회해 자식 환경을 재구성하는 경로가 된다
+    (적대검증에서 확인된 격리 구멍). 링크를 제거하면 strix 는 이 격리 HOME 안의 **새 .strix**
+    상태로 동작하므로 두 우회가 동시에 닫힌다. strix 바이너리는 PATH(shutil.which)로 찾고,
+    인증·설정이 필요하면 운영자가 STRIX_* env(화이트리스트 통과)로 주입한다.
+    """
     home = run_dir / "home"
     (home / "tmp").mkdir(parents=True, exist_ok=True)
     for path in (run_dir, home, home / "tmp"):
         try:
             os.chmod(path, 0o700)
-        except OSError:
-            pass
-    # strix 바이너리/설정 상태(~/.strix)만 심볼릭 링크 1개로 노출한다.
-    link = home / ".strix"
-    real = Path(os.path.expanduser("~")) / ".strix"
-    if real.exists() and not (link.is_symlink() or link.exists()):
-        try:
-            link.symlink_to(real, target_is_directory=True)
         except OSError:
             pass
     return home
