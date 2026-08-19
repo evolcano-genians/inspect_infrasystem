@@ -126,6 +126,68 @@ class DiagramRequest(BaseModel):
     title: str = Field(default="diagram", max_length=80)
 
 
+class SettingsUpdateRequest(BaseModel):
+    """외부 API 토큰 등 설정을 .env에 저장하는 요청 (카탈로그 키만 허용)."""
+
+    updates: dict[str, str] = Field(default_factory=dict)  # {키: 값} — 시크릿 빈 값=유지
+    clears: list[str] = Field(default_factory=list, max_length=32)  # 명시적으로 비울 키
+
+
+class SettingsTestRequest(BaseModel):
+    """저장된 .env 값으로 외부 연동의 연결을 실제 테스트한다."""
+
+    group: str = Field(min_length=1, max_length=40)
+
+
+def _test_connection(group: str, env: dict) -> dict:
+    """그룹별 최소 read 호출로 연결을 검증한다. .env 최신 값 기준(재시작 전에도 확인 가능)."""
+    verify = str(env.get("JIRA_VERIFY_TLS", "1")).strip().lower() not in ("0", "false", "no")
+    if group == "Jira":
+        from .tools.jira_reader import JiraClient, JiraConfig
+
+        cfg = JiraConfig(base_url=env.get("JIRA_BASE_URL", ""), token=env.get("JIRA_TOKEN", ""),
+                         user=env.get("JIRA_USER", ""), cookie=env.get("JIRA_COOKIE", ""),
+                         verify_tls=verify)
+        if not cfg.base_url:
+            return {"ok": False, "message": "JIRA_BASE_URL 이 비어 있습니다"}
+        data = JiraClient(cfg)._get("/rest/api/2/myself")  # 현재 사용자 — read-only 인증 확인
+        who = data.get("displayName") or data.get("name") or "OK"
+        return {"ok": True, "message": f"연결 성공 · 로그인: {who} ({cfg.auth_kind()} 인증)"}
+
+    if group.startswith("Trino"):
+        from .tools.trino_reader import TrinoClient, TrinoConfig
+
+        ep = env.get("TRINO_ENDPOINT", "")
+        if not ep:
+            return {"ok": False, "message": "TRINO_ENDPOINT 가 비어 있습니다"}
+        cfg = TrinoConfig(endpoint=ep, user=env.get("TRINO_USER", "inspect-k8s"),
+                          token=env.get("TRINO_TOKEN", ""), catalog=env.get("TRINO_CATALOG", ""),
+                          schema=env.get("TRINO_SCHEMA", ""))
+        res = TrinoClient(cfg).query("SHOW CATALOGS", max_rows=50)
+        return {"ok": True, "message": f"연결 성공 · 카탈로그 {res.get('row_count', 0)}개"}
+
+    if group == "소스 코드":
+        from .tools.source_reader import SourceHost
+
+        host = env.get("SOURCE_SSH_HOST", "")
+        if not host:
+            return {"ok": False, "message": "SOURCE_SSH_HOST 가 비어 있습니다"}
+        out = SourceHost(host).list_dir("~")
+        if out.startswith("[소스 조회 실패"):
+            return {"ok": False, "message": out[:200]}
+        return {"ok": True, "message": f"SSH 연결 성공 · 홈 디렉터리 조회 {len(out.splitlines())}줄"}
+
+    if group == "샌드박스":
+        from .sandbox.bash_exec import BashSandbox
+
+        res = BashSandbox().run("echo ok", timeout=20)
+        if res.exit_code == 0:
+            return {"ok": True, "message": f"Docker 샌드박스 정상 (image={BashSandbox().image})"}
+        return {"ok": False, "message": f"샌드박스 실행 실패 exit={res.exit_code}"}
+
+    return {"ok": False, "message": f"연결 테스트를 지원하지 않는 그룹: {group}"}
+
+
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
@@ -619,6 +681,40 @@ def make_app(
             session_note=req.session_note,
         )
         return JSONResponse(result)
+
+    # ---------- 설정 메뉴 (외부 API 토큰 .env 관리) ----------
+    _env_path = settings.agents_dir.parent / ".env"
+
+    @app.get("/api/settings")
+    def settings_status() -> JSONResponse:
+        from .settings_store import current_settings
+
+        return JSONResponse({"groups": current_settings(_env_path)})
+
+    @app.put("/api/settings")
+    def settings_update(req: SettingsUpdateRequest) -> JSONResponse:
+        """카탈로그 키만 .env에 저장한다. 시크릿 값은 저장만 하고 되돌려주지 않는다."""
+        from .settings_store import SettingsError, apply_updates
+
+        try:
+            saved = apply_updates(_env_path, req.updates or {}, req.clears or [])
+        except SettingsError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        # 설정은 프로세스 시작 시 읽히므로 재시작해야 적용된다.
+        return JSONResponse({"saved": saved, "needs_restart": bool(saved)})
+
+    @app.post("/api/settings/test")
+    def settings_test(req: SettingsTestRequest) -> JSONResponse:
+        """실효 설정(실행 env + .env, .env 우선)으로 외부 연동 연결을 테스트한다."""
+        import os as _os
+
+        from .settings_store import read_env_file
+
+        env = {**_os.environ, **read_env_file(_env_path)}  # .env가 실행 env를 덮어씀
+        try:
+            return JSONResponse(_test_connection(req.group, env))
+        except Exception as exc:  # 네트워크·인증·docker 오류를 사용자에게 그대로 전달
+            return JSONResponse({"ok": False, "message": f"{type(exc).__name__}: {exc}"})
 
     # ---------- 위키 큐레이터 (LLM 주기 보정: 사실체크·폐기·중복정리) ----------
     @app.get("/api/curator")
