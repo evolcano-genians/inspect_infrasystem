@@ -237,6 +237,18 @@ def make_app(
             extra_tools = [*extra_tools, *make_shell_http_tools(settings.shell_envs, audit)]
         except Exception as exc:
             print(f"경고: nexus-shell HTTP 도구 비활성화 — {type(exc).__name__}: {exc}")
+    # Jira read-only 조회 도구 (JIRA_BASE_URL 설정 시) — 코드 리뷰 이슈 참고
+    if settings.jira_base_url:
+        from .tools.jira_reader import JiraConfig, make_jira_tools
+
+        try:
+            extra_tools = [*extra_tools, *make_jira_tools(JiraConfig(
+                base_url=settings.jira_base_url, token=settings.jira_token,
+                user=settings.jira_user, cookie=settings.jira_cookie,
+                verify_tls=settings.jira_verify_tls,
+            ), audit, redactor=redact_text)]
+        except Exception as exc:
+            print(f"경고: Jira 도구 비활성화 — {type(exc).__name__}: {exc}")
 
     # 컨텍스트별 도구 세트 (클러스터 전환용). 기본 컨텍스트는 위에서 만든 k8s/tools 재사용.
     tools_by_context: dict[str, list] = {}

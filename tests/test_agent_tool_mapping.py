@@ -53,8 +53,10 @@ def _all_tool_names() -> set[str]:
     }))
     from src.tools.multicluster import make_multicluster_tools
     multi_tools = make_multicluster_tools({"ctx-a": WideStub(), "ctx-b": WideStub()})
+    from src.tools.jira_reader import JiraConfig, make_jira_tools
+    jira_tools = make_jira_tools(JiraConfig(base_url="https://jira.example.com", token="t"))
     return {t.name for t in [
-        *k8s_tools, *src_tools, *sec_tools, *trino_tools, *shell_tools, *multi_tools,
+        *k8s_tools, *src_tools, *sec_tools, *trino_tools, *shell_tools, *multi_tools, *jira_tools,
     ]}
 
 
@@ -153,6 +155,8 @@ _REPRESENTATIVE_ARGS: dict[str, dict] = {
     "k8s_read_at": {"context": "aws-seoul-clouddev", "resource": "pods", "namespace": "default"},
     "shell_list_envs": {},
     "shell_http_get": {"env": "vm", "path": "/api/auth/me"},
+    "jira_get_issue": {"key": "https://ims.cloud.genians.com/browse/CL-1415"},
+    "jira_search": {"jql": "project=CL ORDER BY updated DESC", "max_results": 20},
     "sandbox_bash": {"command": "echo hi", "timeout": 30},
     "sandbox_pentest_strix": {"target": "127.0.0.1", "instruction": "scan", "mode": "quick"},
 }

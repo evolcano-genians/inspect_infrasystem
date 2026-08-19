@@ -30,6 +30,7 @@ ALLOWED_VERBS: frozenset[str] = frozenset(
         "sandbox-exec",  # 샌드박스 격리 컨테이너 실행 (bash/pentest — 실 인프라 도달 불가)
         "sql-read",  # Trino read-only SQL 조회 (trino_reader — SELECT/SHOW/DESCRIBE만)
         "http-read",  # nexus-shell 로그인 후 read-only HTTP 조회 (shell_http)
+        "jira-read",  # Jira 이슈/댓글 read-only 조회 (jira_reader — GET만)
     }
 )
 
@@ -90,7 +91,11 @@ _CONTEXT_RE = re.compile(r"^[A-Za-z0-9_.@:/\-]{1,253}$")
 _RESOURCE_ARGS = frozenset({"resource"})        # 비교 리소스 종류 (list_* 매핑 키)
 _RESOURCE_RE = re.compile(r"^[a-z]{1,32}$")
 # 자유 텍스트 인자 → 길이 상한만. 실검증은 도구 내부(SQL 파서·샌드박스 격리)가 수행.
-_FREETEXT_ARGS: dict[str, int] = {"sql": 20_000, "command": 10_000, "instruction": 2_000}
+_FREETEXT_ARGS: dict[str, int] = {"sql": 20_000, "command": 10_000, "instruction": 2_000,
+                                  "jql": 2_000}
+# Jira 이슈 키(또는 browse URL) — jira_reader 내부에서 키를 재추출·검증한다.
+_JIRA_KEY_ARGS = frozenset({"key"})
+_JIRA_KEY_RE = re.compile(r"^[A-Za-z0-9:/._\-]{1,200}$")  # 키 또는 https://.../browse/KEY
 
 
 @dataclass(frozen=True)
@@ -197,6 +202,10 @@ def _validate_arg(key: str, value: object) -> str | None:
             return None  # instruction 등 선택적 자유 텍스트
         if not isinstance(value, str) or len(value) > cap:
             return f"인자 '{key}' 는 {cap}자 이하의 문자열이어야 합니다"
+        return None
+    if key in _JIRA_KEY_ARGS:
+        if not isinstance(value, str) or not _JIRA_KEY_RE.match(value):
+            return f"인자 '{key}' 값 {value!r} 이 유효한 Jira 이슈 키/URL 이 아닙니다"
         return None
     return f"알 수 없는 인자 '{key}' (fail-closed 거부)"
 

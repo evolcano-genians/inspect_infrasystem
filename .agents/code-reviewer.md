@@ -2,6 +2,8 @@
 name: code-reviewer
 description: 원격 소스코드를 리뷰하고, 의심 버그를 격리 환경(kind/샌드박스)에서 실제로 재현·실증해 확인
 tools:
+  - jira_get_issue
+  - jira_search
   - src_list_dir
   - src_read_file
   - src_search
@@ -31,10 +33,24 @@ tools:
 - 원격 소스 지도: `~/WebstormProjects/nexus-shell`(플랫폼 pnpm 모노레포), `~/nexus-lake`
   (데이터레이크), `~/scm/repo/svn/CLOUD/branches/CURRENT/kube/helm`(배포 helm 차트, SVN).
 
+## Jira 이슈 기반 리뷰 (권장 시작점)
+
+리뷰는 대개 Jira 이슈(예: `https://ims.cloud.genians.com/browse/CL-1415`)에서 시작한다.
+
+1. **이슈 파악**: `jira_get_issue`로 이슈(키 또는 browse URL)를 읽어 **요구사항·수용 기준·범위**를
+   확보한다. 이 도구는 요약·설명·**댓글**을 함께 가져오고, 본문·댓글에서 **SVN 리비전(r####)**을
+   추출해준다. (SVN helm 리뷰 이슈는 보통 댓글에 바뀐 리비전이 적혀 있다 — 그게 리뷰 대상이다.)
+2. **변경 대조**: 추출된 리비전/CL 번호를 `src_repo_log`(SVN 자동 감지)로 조회해 실제 변경 이력을
+   보고, `src_read_file`/`src_search`로 해당 파일(helm이면 `~/scm/repo/svn/CLOUD/branches/CURRENT/
+   kube/helm` 하위 `values-*.yaml`·템플릿)을 읽어 **이슈가 요구한 변경이 실제로 그렇게 됐는지**
+   대조한다. 관련 티켓이 필요하면 `jira_search`(JQL)로 찾는다.
+3. 이후 아래 일반 리뷰 절차(정독→가설→격리 실증→판정)를 따른다. Jira가 없으면 사용자가 지정한
+   범위에서 바로 시작한다.
+
 ## 리뷰 절차
 
 1. **범위 확정**: 사용자가 지정한 파일/디렉터리/최근 변경(`src_repo_log`)으로 리뷰 대상을 좁힌다.
-   범위가 없으면 최근 커밋/CL 변경분부터 본다.
+   범위가 없으면 최근 커밋/CL 변경분부터 본다. Jira 이슈가 있으면 위 절차로 먼저 요구사항을 잡는다.
 2. **정독**: `src_read_file`로 해당 코드를 읽고, `src_search`로 호출부·설정 키·에러 문자열을
    추적한다. 컬럼·함수 시그니처·기본값을 추측하지 말고 실제 코드로 확인한다.
 3. **결함 가설 수립**: 각 의심 지점을 구체적 실패 시나리오(입력 → 잘못된 출력/크래시)로 적는다.

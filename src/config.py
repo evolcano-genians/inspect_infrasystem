@@ -68,6 +68,11 @@ class Settings:
     shell_envs: dict = field(default_factory=dict)  # nexus-shell HTTP 조사 환경 (SHELL_*)
     curator_enabled: bool = False  # 위키 큐레이터 주기 실행 (CURATOR_ENABLED)
     curator_interval_s: int = 6 * 3600  # 큐레이션 사이클 간격(초, CURATOR_INTERVAL_S)
+    jira_base_url: str = ""  # Jira read-only 조회 (JIRA_BASE_URL) — 코드 리뷰 이슈 참고
+    jira_token: str = ""
+    jira_user: str = ""  # 있으면 basic, 없으면 PAT(Bearer)
+    jira_cookie: str = ""  # SSO 전용 인스턴스용 세션 쿠키 폴백
+    jira_verify_tls: bool = True
 
 
 def load_settings(root: Path | None = None) -> Settings:
@@ -96,6 +101,12 @@ def load_settings(root: Path | None = None) -> Settings:
         shell_envs=_load_shell_envs(),
         curator_enabled=_truthy(os.environ.get("CURATOR_ENABLED")),
         curator_interval_s=int(os.environ.get("CURATOR_INTERVAL_S", str(6 * 3600))),
+        jira_base_url=os.environ.get("JIRA_BASE_URL", "").strip(),
+        jira_token=os.environ.get("JIRA_TOKEN", ""),
+        jira_user=os.environ.get("JIRA_USER", "").strip(),
+        jira_cookie=os.environ.get("JIRA_COOKIE", "").strip(),
+        jira_verify_tls=str(os.environ.get("JIRA_VERIFY_TLS", "1")).strip().lower()
+        not in ("0", "false", "no"),
     )
 
 
