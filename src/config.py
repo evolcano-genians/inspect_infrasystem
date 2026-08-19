@@ -57,6 +57,9 @@ class Settings:
     source_ssh_host: str = ""  # user@host — 소스 read-only 조회용 (SOURCE_SSH_HOST)
     sandbox_bash_enabled: bool = False  # 샌드박스 격리 bash (SANDBOX_BASH_ENABLED)
     strix_enabled: bool = False  # strix pentest (STRIX_ENABLED)
+    #: strix 대상 허용목록 치환 (STRIX_ALLOWED_TARGETS, 콤마 구분 CIDR/호스트/`*.도메인`).
+    #: 미설정 시 기본값(루프백·로컬 kind 172.18/16·`*.vmlab.test`·전용 작업 디렉터리)만 허용.
+    strix_allowed_targets: str = ""
     trino_endpoint: str = ""  # nexus-lake Trino read-only SQL (TRINO_ENDPOINT)
     trino_user: str = "inspect-k8s"
     trino_token: str = ""
@@ -84,6 +87,7 @@ def load_settings(root: Path | None = None) -> Settings:
         source_ssh_host=os.environ.get("SOURCE_SSH_HOST", ""),
         sandbox_bash_enabled=_truthy(os.environ.get("SANDBOX_BASH_ENABLED")),
         strix_enabled=_truthy(os.environ.get("STRIX_ENABLED")),
+        strix_allowed_targets=os.environ.get("STRIX_ALLOWED_TARGETS", ""),
         trino_endpoint=os.environ.get("TRINO_ENDPOINT", ""),
         trino_user=os.environ.get("TRINO_USER", "inspect-k8s"),
         trino_token=os.environ.get("TRINO_TOKEN", ""),

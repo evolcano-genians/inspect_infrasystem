@@ -12,6 +12,7 @@ OpenHands의 컨테이너 격리 패턴을 따르되, 이 프로젝트의 2계�
 3. **최소 권한**: non-root, cap_drop=ALL, no-new-privileges, read-only rootfs,
    mem/pids/cpu 제한, 일회용 컨테이너(--rm).
 4. **자격증명 env 차단**: KUBECONFIG/AWS_*/AZURE_* 등은 컨테이너 env로 전달하지 않는다.
+   (이 검증은 strix 경로도 `assert_no_credential_env` 로 공유한다 — security_tools.py 참고.)
 
 이 실행기는 opt-in(SANDBOX_BASH_ENABLED=1)이며, 기존 read-only 4중 방어선과 독립적이다.
 """
@@ -46,6 +47,19 @@ class BashResult:
     timed_out: bool
 
 
+def assert_no_credential_env(environment: dict | None) -> None:
+    """자격증명성 env 키(denylist)가 섞였는지 검증. BashSandbox·strix 경로가 공유한다.
+
+    **한계(중요)**: 이 denylist는 접두사 기반이라 `TRINO_TOKEN`·`SHELL_VM_PASSWORD`·
+    `SOURCE_SSH_HOST` 같은 이 프로젝트 고유 키는 잡지 못한다. 따라서 strix 경로의 1차
+    방어는 이 assert 가 아니라 **default-deny 화이트리스트 조립**
+    (`security_tools._build_strix_env`)이며, 이 함수는 그 뒤에 붙는 보조 최종 어서션이다.
+    """
+    for key in (environment or {}):
+        if any(key.upper().startswith(p) for p in _CREDENTIAL_ENV_PREFIXES):
+            raise SandboxExecError(f"자격증명성 환경변수 '{key}' 는 샌드박스에 전달할 수 없습니다.")
+
+
 def _assert_safe_config(network: str, volumes: dict | None, environment: dict | None) -> None:
     """실 인프라 접근 가능성을 구조적으로 차단하는 사전 검증."""
     if network not in ALLOWED_NETWORKS:
@@ -58,9 +72,7 @@ def _assert_safe_config(network: str, volumes: dict | None, environment: dict | 
             "호스트 볼륨 마운트는 금지됩니다 — 자격증명(~/.kube 등)이 컨테이너에 들어갈 수 "
             "없어야 합니다. 작업공간은 tmpfs 만 사용하세요."
         )
-    for key in (environment or {}):
-        if any(key.upper().startswith(p) for p in _CREDENTIAL_ENV_PREFIXES):
-            raise SandboxExecError(f"자격증명성 환경변수 '{key}' 는 샌드박스에 전달할 수 없습니다.")
+    assert_no_credential_env(environment)
 
 
 class BashSandbox:

@@ -192,13 +192,28 @@ def make_app(
             print(f"경고: 소스 열람 비활성화 — {exc}")
     # 보안 테스트 도구 (SANDBOX_BASH_ENABLED / STRIX_ENABLED 시)
     if settings.sandbox_bash_enabled or settings.strix_enabled:
+        from .config import is_real_kubeconfig
         from .sandbox.security_tools import make_security_tools
 
         try:
+            # strix 는 호스트에서 직접 돌기 때문에 대상 허용목록·하드 denylist·실 클러스터
+            # 인터록을 설정에서 파생시켜 넘긴다 (security_tools 모듈 docstring 참고).
+            # vm(인가된 실증 랩) 이외의 nexus-shell base 는 실 인프라이므로 deny 재료다.
+            real_bases = tuple(
+                env.base_url for name, env in (settings.shell_envs or {}).items()
+                if name != "vm" and getattr(env, "base_url", "")
+            )
             extra_tools = [*extra_tools, *make_security_tools(
                 bash_enabled=settings.sandbox_bash_enabled,
                 strix_enabled=settings.strix_enabled,
                 audit=audit,
+                strix_allowed_targets=settings.strix_allowed_targets,
+                real_cluster_mode=(
+                    settings.allow_real_cluster
+                    or bool(settings.kubeconfig and is_real_kubeconfig(settings.kubeconfig))
+                ),
+                shell_env_bases=real_bases,
+                kubeconfig=settings.kubeconfig,
             )]
         except Exception as exc:
             print(f"경고: 보안 도구 비활성화 — {type(exc).__name__}: {exc}")
