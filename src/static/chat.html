@@ -132,7 +132,9 @@
   }
   .zoomStage {
     transform-origin: center center; will-change: transform; touch-action: none;
-    background: #fff; border-radius: 6px; padding: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.5);
+    /* dark 테마 mermaid(밝은 선·글자)가 보이도록 어두운 배경 */
+    background: #161a22; border: 1px solid #2a2f3a; border-radius: 6px; padding: 14px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.6);
   }
   .zoomStage svg { display: block; }
   .zoomCtrl {
@@ -758,11 +760,29 @@ function openDiagramZoom(svg, safeName) {
   stage.className = "zoomStage";
   stage.innerHTML = svg;
   const svgEl = stage.querySelector("svg");
-  if (svgEl) { svgEl.style.maxWidth = "none"; svgEl.style.height = "auto"; svgEl.style.width = "auto"; }
+  // mermaid SVG는 명시적 px 크기가 없어 그대로 두면 컨테이너에서 0으로 수축한다.
+  // viewBox(또는 width/height 속성)에서 원래 크기를 읽어 픽셀로 고정한다.
+  let baseW = 800, baseH = 600;
+  if (svgEl) {
+    const vb = (svgEl.getAttribute("viewBox") || "").split(/[\s,]+/).map(Number);
+    if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) { baseW = vb[2]; baseH = vb[3]; }
+    else {
+      baseW = parseFloat(svgEl.getAttribute("width")) || baseW;
+      baseH = parseFloat(svgEl.getAttribute("height")) || baseH;
+    }
+    svgEl.removeAttribute("width"); svgEl.removeAttribute("height");
+    svgEl.style.maxWidth = "none";
+    svgEl.style.width = baseW + "px";
+    svgEl.style.height = baseH + "px";
+    svgEl.style.display = "block";
+  }
+  // 초기 배율: 다이어그램이 화면(90%×82%)에 딱 맞게. 이후 휠/버튼으로 더 확대 가능.
+  const fitScale = Math.min((window.innerWidth * 0.9) / baseW,
+                            (window.innerHeight * 0.82) / baseH) || 1;
 
-  let scale = 1, tx = 0, ty = 0, dragging = false, sx = 0, sy = 0;
+  let scale = fitScale, tx = 0, ty = 0, dragging = false, sx = 0, sy = 0;
   const apply = () => { stage.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
-  const zoomAt = (factor) => { scale = Math.min(8, Math.max(0.2, scale * factor)); apply(); };
+  const zoomAt = (factor) => { scale = Math.min(12, Math.max(0.1, scale * factor)); apply(); };
 
   back.addEventListener("wheel", e => {
     e.preventDefault();
@@ -786,9 +806,10 @@ function openDiagramZoom(svg, safeName) {
     const b = document.createElement("button"); b.textContent = label; b.title = title;
     b.addEventListener("click", e => { e.stopPropagation(); fn(); }); ctrl.appendChild(b); return b;
   };
+  const reset = () => { scale = fitScale; tx = 0; ty = 0; apply(); };
   btn("＋", "확대", () => zoomAt(1.25));
   btn("－", "축소", () => zoomAt(1 / 1.25));
-  btn("⤢", "화면에 맞춤(리셋)", () => { scale = 1; tx = 0; ty = 0; apply(); });
+  btn("⤢", "화면에 맞춤(리셋)", reset);
   btn("🖼", "PNG 저장", () => { if (svgEl) svgToPng(svgEl, safeName + ".png", 2); });
   btn("✕", "닫기 (Esc)", () => close());
 
@@ -797,7 +818,7 @@ function openDiagramZoom(svg, safeName) {
     if (e.key === "Escape") close();
     else if (e.key === "+" || e.key === "=") zoomAt(1.25);
     else if (e.key === "-") zoomAt(1 / 1.25);
-    else if (e.key === "0") { scale = 1; tx = 0; ty = 0; apply(); }
+    else if (e.key === "0") reset();
   };
   document.addEventListener("keydown", onKey);
   back.addEventListener("click", e => { if (e.target === back) close(); });  // 배경 클릭 닫기
