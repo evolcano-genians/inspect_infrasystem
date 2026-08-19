@@ -124,6 +124,30 @@
   }
   .diagramBar button:hover { border-color: var(--accent); color: var(--accent); }
   .diagramWarn { padding: 6px 12px; font-size: 12px; color: var(--bad); }
+  /* ---- 다이어그램 확대 뷰어 ---- */
+  .zoomOverlay {
+    position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.82);
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+    backdrop-filter: blur(2px);
+  }
+  .zoomStage {
+    transform-origin: center center; will-change: transform; touch-action: none;
+    background: #fff; border-radius: 6px; padding: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.5);
+  }
+  .zoomStage svg { display: block; }
+  .zoomCtrl {
+    position: fixed; top: 16px; right: 16px; display: flex; gap: 6px; z-index: 101;
+  }
+  .zoomCtrl button {
+    width: 36px; height: 36px; font-size: 16px; border-radius: 9px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .zoomCtrl button:hover { border-color: var(--accent); color: var(--accent); }
+  .zoomHint {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 101;
+    font-size: 12px; color: #ddd; background: rgba(0,0,0,.5); padding: 5px 12px; border-radius: 999px;
+  }
   /* ---- 진행 상태 표시 ---- */
   .statusBar {
     display: none; align-self: flex-start; align-items: center; gap: 8px;
@@ -726,6 +750,68 @@ function svgToPng(svgEl, filename, scale) {
   img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgText);
 }
 
+// 다이어그램 전체화면 확대 뷰어 — 휠 줌 + 드래그 팬 + 버튼(+/-/리셋)
+function openDiagramZoom(svg, safeName) {
+  const back = document.createElement("div");
+  back.className = "zoomOverlay";
+  const stage = document.createElement("div");
+  stage.className = "zoomStage";
+  stage.innerHTML = svg;
+  const svgEl = stage.querySelector("svg");
+  if (svgEl) { svgEl.style.maxWidth = "none"; svgEl.style.height = "auto"; svgEl.style.width = "auto"; }
+
+  let scale = 1, tx = 0, ty = 0, dragging = false, sx = 0, sy = 0;
+  const apply = () => { stage.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
+  const zoomAt = (factor) => { scale = Math.min(8, Math.max(0.2, scale * factor)); apply(); };
+
+  back.addEventListener("wheel", e => {
+    e.preventDefault();
+    zoomAt(e.deltaY < 0 ? 1.15 : 1 / 1.15);
+  }, { passive: false });
+  stage.addEventListener("pointerdown", e => {
+    dragging = true; sx = e.clientX - tx; sy = e.clientY - ty;
+    stage.setPointerCapture(e.pointerId); stage.style.cursor = "grabbing";
+  });
+  stage.addEventListener("pointermove", e => {
+    if (!dragging) return; tx = e.clientX - sx; ty = e.clientY - sy; apply();
+  });
+  const endDrag = () => { dragging = false; stage.style.cursor = "grab"; };
+  stage.addEventListener("pointerup", endDrag);
+  stage.addEventListener("pointercancel", endDrag);
+
+  // 컨트롤 바
+  const ctrl = document.createElement("div");
+  ctrl.className = "zoomCtrl";
+  const btn = (label, title, fn) => {
+    const b = document.createElement("button"); b.textContent = label; b.title = title;
+    b.addEventListener("click", e => { e.stopPropagation(); fn(); }); ctrl.appendChild(b); return b;
+  };
+  btn("＋", "확대", () => zoomAt(1.25));
+  btn("－", "축소", () => zoomAt(1 / 1.25));
+  btn("⤢", "화면에 맞춤(리셋)", () => { scale = 1; tx = 0; ty = 0; apply(); });
+  btn("🖼", "PNG 저장", () => { if (svgEl) svgToPng(svgEl, safeName + ".png", 2); });
+  btn("✕", "닫기 (Esc)", () => close());
+
+  const close = () => { document.removeEventListener("keydown", onKey); back.remove(); };
+  const onKey = e => {
+    if (e.key === "Escape") close();
+    else if (e.key === "+" || e.key === "=") zoomAt(1.25);
+    else if (e.key === "-") zoomAt(1 / 1.25);
+    else if (e.key === "0") { scale = 1; tx = 0; ty = 0; apply(); }
+  };
+  document.addEventListener("keydown", onKey);
+  back.addEventListener("click", e => { if (e.target === back) close(); });  // 배경 클릭 닫기
+
+  const hint = document.createElement("div");
+  hint.className = "zoomHint";
+  hint.textContent = "휠: 줌 · 드래그: 이동 · Esc: 닫기";
+
+  stage.style.cursor = "grab";
+  back.append(stage, ctrl, hint);
+  document.body.appendChild(back);
+  apply();
+}
+
 function makeDiagram(code) {
   const wrap = document.createElement("div");
   wrap.className = "diagram";
@@ -744,13 +830,20 @@ function makeDiagram(code) {
     .then(({ svg }) => {
       view.innerHTML = svg;
       const svgEl = view.querySelector("svg");
-      if (svgEl) { svgEl.style.maxWidth = "100%"; svgEl.style.height = "auto"; }
+      if (svgEl) {
+        svgEl.style.maxWidth = "100%"; svgEl.style.height = "auto";
+        // 다이어그램을 클릭하면 전체화면으로 확대(줌·팬)
+        view.style.cursor = "zoom-in";
+        view.title = "클릭하면 확대해서 봅니다";
+        view.addEventListener("click", () => openDiagramZoom(svg, safeName));
+      }
       const mk = (label, title, fn) => {
         const b = document.createElement("button");
         b.textContent = label; b.title = title;
         b.addEventListener("click", fn);
         bar.appendChild(b);
       };
+      mk("🔍 확대", "전체화면으로 확대(휠 줌·드래그 이동)", () => openDiagramZoom(svg, safeName));
       mk("🖼 PNG 저장", "다이어그램을 PNG 이미지로 내려받기", () => {
         if (svgEl) svgToPng(svgEl, safeName + ".png", 2);
       });
