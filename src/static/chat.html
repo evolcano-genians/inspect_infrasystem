@@ -1465,7 +1465,7 @@ async function openSettings() {
       try {
         const res = await fetch("/api/settings/test", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ group: grp.group }),
+          body: JSON.stringify({ group: grp.group, overrides: collectUpdates() }),
         });
         const d = await res.json();
         result.textContent = (d.ok ? "✅ " : "⛔ ") + (d.message || "");

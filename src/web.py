@@ -134,9 +134,10 @@ class SettingsUpdateRequest(BaseModel):
 
 
 class SettingsTestRequest(BaseModel):
-    """저장된 .env 값으로 외부 연동의 연결을 실제 테스트한다."""
+    """외부 연동 연결을 실제 테스트한다. overrides로 폼의 미저장 값도 함께 검증한다."""
 
     group: str = Field(min_length=1, max_length=40)
+    overrides: dict[str, str] = Field(default_factory=dict)  # 폼에 입력했으나 아직 저장 안 한 값
 
 
 def _test_connection(group: str, env: dict) -> dict:
@@ -705,12 +706,18 @@ def make_app(
 
     @app.post("/api/settings/test")
     def settings_test(req: SettingsTestRequest) -> JSONResponse:
-        """실효 설정(실행 env + .env, .env 우선)으로 외부 연동 연결을 테스트한다."""
+        """실효 설정으로 연결을 테스트한다. 우선순위: 폼 입력(overrides) > .env > 실행 env.
+
+        overrides 덕분에 저장하기 전에도 방금 입력한 값으로 바로 확인할 수 있다.
+        (카탈로그 키만 반영 — 임의 키 주입 차단.)
+        """
         import os as _os
 
-        from .settings_store import read_env_file
+        from .settings_store import _CATALOG_BY_KEY, read_env_file
 
-        env = {**_os.environ, **read_env_file(_env_path)}  # .env가 실행 env를 덮어씀
+        overrides = {k: v for k, v in (req.overrides or {}).items()
+                     if k in _CATALOG_BY_KEY and isinstance(v, str) and v.strip()}
+        env = {**_os.environ, **read_env_file(_env_path), **overrides}
         try:
             return JSONResponse(_test_connection(req.group, env))
         except Exception as exc:  # 네트워크·인증·docker 오류를 사용자에게 그대로 전달
