@@ -124,6 +124,31 @@ class JiraClient:
             h["Authorization"] = "Bearer " + self.config.token
         return h
 
+    def _auth_hint(self, status: int) -> str:
+        """401/403 에 대해 '무엇을 고쳐야 하는지'까지 알려준다.
+
+        가장 흔한 실수: Atlassian **Cloud** API 토큰(`ATATT...`)을 Bearer 로 보내는 것.
+        Cloud 는 반드시 `이메일 + API 토큰` basic 인증을 요구한다(PAT Bearer 는 Server/DC 전용).
+        """
+        kind = self.config.auth_kind()
+        cloud_token = self.config.token.startswith("ATATT")
+        if kind == "none":
+            return f"인증 정보 없음({status}) — JIRA_TOKEN 을 설정하세요"
+        if cloud_token and kind == "bearer":
+            return (
+                f"인증 실패({status}) — 토큰이 Atlassian **Cloud** API 토큰(ATATT…)인데 "
+                "Bearer 로 전송되었습니다. Cloud 는 '이메일 + API 토큰' basic 인증만 받습니다. "
+                "설정에서 **User** 칸에 Atlassian 계정 이메일을 입력하세요 "
+                "(Bearer PAT 는 Jira Server/DC 전용)."
+            )
+        if kind == "basic":
+            return (f"인증 실패({status}) — 이메일(JIRA_USER)과 API 토큰 조합을 확인하세요. "
+                    "Cloud 토큰은 https://id.atlassian.com/manage-profile/security/api-tokens 에서 발급합니다.")
+        if kind == "cookie":
+            return f"인증 실패({status}) — 세션 쿠키가 만료되었을 수 있습니다. 브라우저에서 다시 복사하세요."
+        return (f"인증 실패({status}) — 토큰/권한을 확인하세요. Server/DC 는 PAT(Bearer), "
+                "Cloud 는 이메일+API토큰(basic) 입니다.")
+
     def _get(self, path: str, params: dict | None = None) -> dict:
         """GET 만 수행한다. 호스트 잠금 + 리다이렉트 미추종(호스트 이탈 방지)."""
         from urllib.parse import urlparse
@@ -144,10 +169,8 @@ class JiraClient:
                 if loc and urlparse(loc).hostname not in (None, self._host):
                     raise JiraError(f"타 호스트로의 리다이렉트를 거부했습니다: {urlparse(loc).hostname}")
                 raise JiraError(f"예상치 못한 리다이렉트(status={resp.status_code})")
-            if resp.status_code == 401:
-                raise JiraError("인증 실패(401) — JIRA_TOKEN/JIRA_USER 를 확인하세요")
-            if resp.status_code == 403:
-                raise JiraError("권한 없음(403) — 이 이슈에 접근 권한이 있는지 확인하세요")
+            if resp.status_code in (401, 403):
+                raise JiraError(self._auth_hint(resp.status_code))
             if resp.status_code == 404:
                 raise JiraError("이슈/리소스를 찾을 수 없습니다(404)")
             if resp.status_code >= 400:
