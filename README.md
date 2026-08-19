@@ -333,7 +333,8 @@ KUBECONFIG=.local/kind-kubeconfig.yaml MODEL_PROVIDER=codex-oauth \
   보고 선택할 수 있다. 기본 제공: `inspector`(builtin), `sre-triage`(장애 분류),
   `capacity-analyst`(용량 분석). **보안 불변식**: 에이전트 정의는 프롬프트만 바꾼다 —
   도구 목록·verb 화이트리스트·전송 가드는 어떤 에이전트를 선택해도 동일하다.
-  사이드바의 "사용 가능한 도구" 패널이 16개 read-only 도구 전체를 노출한다.
+  사이드바의 "사용 가능한 도구" 패널이 활성화된 read-only 도구 전체를 노출한다(기본 25개
+  k8s + 옵션에 따라 소스/Trino/shell/샌드박스/멀티클러스터 도구가 추가된다).
 - **위키 보기·편집**: 사이드바 "📚 위키 보기·편집"으로 장기 기억 전체를 열람·수정할 수 있다.
   편집 저장 시에도 레다크션 필터가 강제 적용되어 "wiki/에 시크릿 평문 없음" 불변식이
   유지되고, 경로 조작은 차단되며, 새 페이지 생성은 조사 플로우만 할 수 있다.
@@ -351,6 +352,60 @@ KUBECONFIG=.local/kind-kubeconfig.yaml MODEL_PROVIDER=codex-oauth \
 
 `.env.example` → `.env` 복사 후 `KUBECONFIG` 경로와 `MODEL_PROVIDER`(기본 `codex-oauth`,
 테스트용 `fake`)만 설정한다. API 키 항목은 존재하지 않는다.
+
+---
+
+## 6.5 조사·분석 확장 기능
+
+### 두 클러스터 비교 (`src/tools/multicluster.py`)
+
+AWS와 Azure 배포 상태를 한 조사에서 대조한다. 안전 컨텍스트가 2개 이상일 때만 활성화되며,
+각 컨텍스트의 `ReadOnlyK8sClient`(GET-only 전송 가드)를 그대로 재사용하므로 새 전송 경로가
+생기지 않는다.
+
+| 도구 | 용도 |
+|---|---|
+| `k8s_list_contexts` | 비교 가능한 컨텍스트 목록 |
+| `k8s_compare(resource, namespace)` | 모든 클러스터에서 동일 리소스를 읽어 `by_context`로 side-by-side |
+| `k8s_read_at(context, resource, namespace)` | 특정 클러스터만 읽기(네임스페이스가 서로 다를 때) |
+
+### nexus-lake 데이터 분석 (`src/tools/trino_reader.py`)
+
+`TRINO_ENDPOINT` 설정 시 read-only SQL 도구가 활성화된다. 탐색 비용을 줄이는 편의 도구:
+`trino_sample`(샘플 행) · `trino_count`(적재량) · `trino_profile`(컬럼 널/고유값/최소최대).
+모든 식별자는 `_ident`로 인젝션이 차단되고, 생성 SQL은 `assert_readonly_sql`을 통과한다.
+`data-analyst` 에이전트가 medallion(bronze→silver→gold) 층간 대조 절차를 안내한다.
+
+### 위키 큐레이터 (`src/curator.py`)
+
+축적된 위키를 LLM으로 주기 보정한다 — 사실관계 체크, 폐기 대상 표시, 중복 병합.
+
+- **durable 큐(SQLite)**: 실패한 잡은 지수 백오프(30초~6시간)로 재큐되어 *언젠가 완료*된다.
+  반복 실패 잡만 `dead`로 격리하되 에러를 보존하고 `revive`로 되살릴 수 있다.
+- **이전 실행 기억**: 페이지별 마지막 큐레이션 시각과 조치 저널을 남겨 같은 작업을 반복하지 않는다.
+- **보수적 편집**: 저확신(<0.4)·내용 급감(<50%)·빈 결과는 자동 적용하지 않고 검토 대상으로만
+  표시한다. 적용 시 레다크션을 다시 걸고 프론트매터를 보존한다.
+- 구동: `CURATOR_ENABLED=1`(백그라운드, `CURATOR_INTERVAL_S` 기본 6시간) · UI "🧹 위키 큐레이터"
+  · `POST /api/curator/run` · `python -m src.curator`(OS cron).
+
+### 메타프롬프트 (`src/metaprompt.py`)
+
+축적된 조사 지식(위키·교훈·환경 맵)을 Claude 세션에 붙여넣을 하나의 프롬프트로 합성한다
+(LLM 호출 없는 결정론적 조립). 헤더 "🧠 메타프롬프트" 또는 `POST /api/metaprompt`.
+`topic`으로 범위를 좁히고 `task`로 시킬 작업을 지정하며, 시크릿 라인은 방어적으로 제외된다.
+
+### UI 기능
+
+- **다이어그램**: 답변의 ` ```mermaid ` 블록을 도식화하고 **PNG·SVG로 저장**한다. mermaid는
+  로컬 번들(`src/static/vendor/`)이라 오프라인에서도 동작하며 `securityLevel: strict`로
+  실행된다(다이어그램 텍스트는 신뢰 불가 데이터).
+- **마크다운 표**: 표·제목·목록을 렌더링한다(넓은 표는 자체 영역에서 가로 스크롤).
+- **진행 상태**: 생각중 → 도구 실행(횟수) → 관찰 해석 → 답변 작성 → 완료를 경과 시간과 함께 표시.
+- **컨텍스트 윈도우**: 헤더에 사용률 바(60%/80% 경고색). 세션 전환 시 초기화된다.
+- **슬래시 명령**: `/compact`(대화를 요약으로 압축 — 위키 기억은 유지) `/clear` `/context`
+  `/agents` `/tools` `/wiki` `/meta` `/learn` `/help`. `/` 입력 시 자동완성(Tab 완성).
+- **도구 호출 접기**: 도구 호출은 한 줄 요약으로 접히고 클릭하면 인자 전체가 펼쳐진다.
+  이전 세션의 도구 활동도 복원된다.
 
 ---
 
@@ -373,6 +428,10 @@ KUBECONFIG=.local/kind-kubeconfig.yaml MODEL_PROVIDER=codex-oauth \
 | 13 | 편집 API — 위키 편집 시 레다크션 강제·경로 조작 차단, 에이전트 편집/생성·리로드 | `test_editor_api.py` | ✗ |
 | 14 | 자가 진화 — 신호 감지·교훈 축적(레다크션)·프롬프트 주입·제안 승인 게이트 | `test_evolution.py` | ✗ |
 | 15 | dev→kind 복제 — 매니페스트 정제, 루프백 강제, helm 읽기 전용, Secret 스텁 | `test_clone.py` | ✗ |
+| 16 | 에이전트↔도구 매핑 — 매핑이 실 도구를 가리키는지, 확장 도구가 executor 검증을 통과하는지(인자 화이트리스트 회귀) | `test_agent_tool_mapping.py` | ✗ |
+| 17 | 멀티 클러스터 비교 — side-by-side 조회, 컨텍스트 스코프, resource enum 검증, 단일 클러스터 시 비활성 | `test_multicluster.py` | ✗ |
+| 18 | 메타프롬프트 — 위키·교훈 합성, topic 필터, 시크릿 라인 방어, 길이 상한 | `test_metaprompt.py` | ✗ |
+| 19 | 위키 큐레이터 — durable 큐 재시도·백오프·dead 회생·이전 실행 기억, 보수적 편집 가드, 실패 흡수 | `test_curator.py` | ✗ |
 
 클러스터 필요 테스트는 `KUBECONFIG` 미설정 시 skip 처리되지만, **공식 검증 절차(§6)는 반드시
 샌드박스를 대상으로 전체 실행**한다.
@@ -389,30 +448,51 @@ inspect-k8s/
 ├── README.md
 ├── pyproject.toml
 ├── .env.example                 # KUBECONFIG, MODEL_PROVIDER (API 키 항목 없음)
-├── .agents/                     # 에이전트 정의 (Claude Code .claude/agents 패턴)
-│   ├── sre-triage.md
-│   └── capacity-analyst.md
+├── .agents/                     # 에이전트 정의 (Claude Code .claude/agents 패턴) — 9종
+│   ├── sre-triage.md            # 장애 분류
+│   ├── capacity-analyst.md      # 용량 분석
+│   ├── network-debugger.md      # 서비스·엔드포인트·CRD 라우팅
+│   ├── log-collector.md         # 로그 전문 수집
+│   ├── code-correlator.md       # 런타임 증상 ↔ 소스(git/SVN) 교차 분석
+│   ├── security-auditor.md      # 샌드박스 보안 점검
+│   ├── data-analyst.md          # nexus-lake medallion 데이터 분석
+│   └── platform-inspector.md    # nexus-shell 플랫폼 런타임
 ├── scripts/
-│   └── bootstrap-codex-auth.py  # codex CLI 세션 → 어댑터 자격증명 이식
+│   ├── bootstrap-codex-auth.py  # codex CLI 세션 → 어댑터 자격증명 이식
+│   ├── set-credentials.py       # nexus-shell 자격증명 입력(.env, chmod 600)
+│   └── push-github.sh           # Mac → 릴레이 서버 → GitHub 푸시
+├── desktop/                     # Electron 앱 (백엔드 기동 + git-pull 자동 업데이트)
 ├── src/
-│   ├── graph.py                 # LangGraph StateGraph 조립 + checkpointer
+│   ├── graph.py                 # LangGraph StateGraph 조립 + checkpointer + 예산/재귀 한도
 │   ├── cli.py                   # 자연어 질의 진입점 (CLI)
-│   ├── web.py                   # 웹 대화 하네스 (FastAPI + SSE, 세션·에이전트 API)
+│   ├── web.py                   # 웹 대화 하네스 (FastAPI + SSE, 세션·에이전트·큐레이터 API)
 │   ├── sessions.py              # 세션 레지스트리 (제목·활동·에이전트 메타)
 │   ├── agents.py                # .agents/*.md 로더
-│   ├── static/chat.html         # 브라우저 채팅 UI (세션 사이드바 + 에이전트 패널)
+│   ├── metaprompt.py            # 조사 지식 → Claude 세션 인계 프롬프트
+│   ├── curator.py               # 위키 큐레이터 (durable 잡 큐 + LLM 보정)
+│   ├── devlog.py                # 대화·피드백 기록 → 개선 리포트
+│   ├── static/chat.html         # 브라우저 채팅 UI (표·다이어그램·상태·슬래시 명령)
+│   ├── static/vendor/           # 로컬 번들 (mermaid — 오프라인 다이어그램)
 │   ├── config.py                # 컨텍스트 이름 가드, env 로딩
 │   ├── audit.py                 # append-only JSONL audit 로거
 │   ├── llm.py                   # Codex(호환 보정) / heuristic / scripted 모델 팩토리
 │   ├── tools/
 │   │   ├── guarded_client.py    # GET-only 전송 가드 (장치 3)
 │   │   ├── k8s_read.py          # read 전용 facade + 도구 정의 (장치 1)
-│   │   └── verb_validator.py    # 결정론적 verb 검증 (장치 2)
+│   │   ├── verb_validator.py    # 결정론적 verb·인자 검증 (장치 2, fail-closed)
+│   │   ├── multicluster.py      # 두 클러스터 side-by-side 비교
+│   │   ├── source_reader.py     # SSH 소스 열람 (git/SVN, 명령 화이트리스트)
+│   │   ├── trino_reader.py      # nexus-lake read-only SQL + 프로파일링
+│   │   └── shell_http.py        # nexus-shell 로그인 후 GET 전용 조사
+│   ├── sandbox/
+│   │   ├── bash_exec.py         # Docker 격리 실행기 (자격증명 무마운트)
+│   │   └── security_tools.py    # 샌드박스 bash + strix pentest (opt-in)
 │   └── nodes/
 │       ├── planner.py
 │       ├── formatter.py
 │       ├── wiki_reader.py
-│       └── wiki_writer.py       # 레다크션 필터 포함
+│       ├── wiki_writer.py       # 레다크션 필터 포함
+│       └── reflector.py         # 자가 진화 (교훈·스킬 제안)
 ├── wiki/                        # 장기 기억 (git 버전관리)
 ├── local-verify/
 │   ├── guard-check.sh
