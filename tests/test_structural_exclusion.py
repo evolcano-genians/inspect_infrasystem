@@ -18,9 +18,11 @@ SRC = PROJECT_ROOT / "src"
 FORBIDDEN_PREFIXES = ("create_", "delete_", "patch_", "replace_", "connect_")
 
 #: K8s가 아닌 로컬 저장소 API에 한해 문서화된 예외.
-#: - delete_thread: LangGraph SqliteSaver의 로컬 체크포인트(대화 이력) 삭제 —
-#:   클러스터로 나가는 호출이 아니다. 단, K8s 레이어(src/tools/)에서는 예외 없이 금지된다.
-ALLOWED_LOCAL_SYMBOLS = frozenset({"delete_thread"})
+#: - delete_thread: LangGraph SqliteSaver의 로컬 체크포인트(대화 이력) 삭제.
+#: - create_project/delete_project: 로컬 세션 묶음(SessionStore sqlite) 관리 — UI 프로젝트
+#:   기능이며 클러스터로 나가는 호출이 아니다. (create_/delete_ 접두사가 우연히 겹칠 뿐)
+#: 모두 클러스터 호출이 아니며, K8s 레이어(src/tools/)에서는 예외 없이 금지된다.
+ALLOWED_LOCAL_SYMBOLS = frozenset({"delete_thread", "create_project", "delete_project"})
 
 
 def _iter_src_files():

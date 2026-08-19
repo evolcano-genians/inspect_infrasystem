@@ -140,6 +140,18 @@ class SettingsTestRequest(BaseModel):
     overrides: dict[str, str] = Field(default_factory=dict)  # 폼에 입력했으나 아직 저장 안 한 값
 
 
+class ProjectCreateRequest(BaseModel):
+    name: str = Field(default="새 프로젝트", max_length=80)
+
+
+class ProjectRenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class SessionAssignRequest(BaseModel):
+    project_id: str = Field(default="", max_length=64)  # "" = 미분류로 빼기
+
+
 def _test_connection(group: str, env: dict) -> dict:
     """그룹별 최소 read 호출로 연결을 검증한다. .env 최신 값 기준(재시작 전에도 확인 가능)."""
     verify = str(env.get("JIRA_VERIFY_TLS", "1")).strip().lower() not in ("0", "false", "no")
@@ -807,11 +819,40 @@ def make_app(
 
     @app.get("/api/sessions")
     def list_sessions() -> JSONResponse:
-        return JSONResponse({"sessions": [s.to_dict() for s in sessions.list()]})
+        return JSONResponse({
+            "sessions": [s.to_dict() for s in sessions.list()],
+            "projects": [p.to_dict() for p in sessions.list_projects()],
+        })
 
     @app.post("/api/sessions")
     def new_session() -> JSONResponse:
         return JSONResponse({"thread_id": "web-" + uuid.uuid4().hex[:8]})
+
+    # ---- 프로젝트 (세션 묶음, Claude Desktop 스타일) ----
+    @app.get("/api/projects")
+    def list_projects() -> JSONResponse:
+        return JSONResponse({"projects": [p.to_dict() for p in sessions.list_projects()]})
+
+    @app.post("/api/projects")
+    def create_project(req: ProjectCreateRequest) -> JSONResponse:
+        return JSONResponse(sessions.create_project(req.name).to_dict())
+
+    @app.put("/api/projects/{project_id}")
+    def rename_project(project_id: str, req: ProjectRenameRequest) -> JSONResponse:
+        ok = sessions.rename_project(project_id, req.name)
+        return JSONResponse({"renamed": ok}, status_code=(200 if ok else 404))
+
+    @app.delete("/api/projects/{project_id}")
+    def delete_project(project_id: str) -> JSONResponse:
+        # 프로젝트만 삭제 — 소속 세션은 미분류로 남는다(대화·체크포인트 보존).
+        return JSONResponse({"removed": sessions.remove_project(project_id)})
+
+    @app.put("/api/sessions/{thread_id}/project")
+    def assign_session_project(thread_id: str, req: SessionAssignRequest) -> JSONResponse:
+        if not _THREAD_ID_RE.match(thread_id):
+            return JSONResponse({"error": "thread_id 형식이 올바르지 않습니다"}, status_code=400)
+        ok = sessions.assign_project(thread_id, req.project_id)
+        return JSONResponse({"assigned": ok}, status_code=(200 if ok else 404))
 
     @app.get("/api/sessions/{thread_id}/history")
     def session_history(thread_id: str) -> JSONResponse:

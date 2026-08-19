@@ -57,6 +57,50 @@
   .sess:hover .del { display: block; }
   .sess .del:hover { color: var(--bad); }
   .sess .del.arm { display: block; color: var(--bad); font-weight: 700; }
+  .sess .moveBtn {
+    position: absolute; right: 24px; top: 8px; border: 0; background: transparent;
+    color: var(--muted); cursor: pointer; font-size: 11px; display: none; padding: 2px 3px;
+  }
+  .sess:hover .moveBtn { display: block; }
+  .sess .moveBtn:hover { color: var(--accent); }
+  .sess.dragging { opacity: .45; }
+  /* ---- 프로젝트(세션 묶음) ---- */
+  .sideBtns { display: flex; gap: 6px; margin: 6px 12px 10px; }
+  .sideBtns .newBtn { margin: 0; }
+  .sideBtns .newBtn:not(.iconBtn) { flex: 1; }
+  .iconBtn { flex-shrink: 0; padding: 8px 10px; }
+  .projHead {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 6px; margin: 4px 4px 0;
+    border-radius: 8px; cursor: pointer; user-select: none; font-size: 12.5px;
+  }
+  .projHead:hover { background: var(--chip); }
+  .projHead.dropTarget { background: var(--chip); outline: 1px dashed var(--accent); }
+  .projCaret { color: var(--muted); font-size: 10px; width: 10px; }
+  .projName { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .projCount { color: var(--muted); font-size: 11px; }
+  .projMenu { border: 0; background: transparent; color: var(--muted); cursor: pointer;
+    font-size: 14px; padding: 0 4px; opacity: 0; }
+  .projHead:hover .projMenu { opacity: 1; }
+  .projMenu:hover { color: var(--accent); }
+  .projBody { padding-left: 8px; border-left: 1px solid var(--line); margin: 0 4px 4px 12px; }
+  .projEmpty { font-size: 11px; color: var(--muted); padding: 6px 8px; font-style: italic; }
+  .projRenameInput, .projNewRow input {
+    width: 100%; font: inherit; font-size: 12.5px; padding: 4px 8px; border-radius: 7px;
+    border: 1px solid var(--accent); background: var(--bg); color: var(--ink); outline: none;
+  }
+  .projNewRow { margin: 4px; }
+  .moveMenu {
+    position: fixed; z-index: 60; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.4); overflow: hidden; min-width: 170px;
+    padding: 4px;
+  }
+  .moveMenu button {
+    display: block; width: 100%; text-align: left; border: 0; background: transparent;
+    color: var(--ink); cursor: pointer; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 7px;
+  }
+  .moveMenu button:hover { background: var(--chip); }
+  .moveMenu .moveNew { color: var(--accent); border-top: 1px solid var(--line); margin-top: 4px; }
+  .moveMenu .moveDel { color: var(--bad); }
   /* ---- 에이전트/도구 패널 ---- */
   .section-label {
     padding: 10px 16px 4px; font-size: 11px; color: var(--muted);
@@ -435,7 +479,10 @@
 <body>
 <aside>
   <div class="brand">🔍 inspect-k8s</div>
-  <button class="newBtn" id="newSession" type="button">＋ 새 세션</button>
+  <div class="sideBtns">
+    <button class="newBtn" id="newSession" type="button">＋ 새 세션</button>
+    <button class="newBtn iconBtn" id="newProject" type="button" title="새 프로젝트(세션 묶음)">📁＋</button>
+  </div>
   <div class="side-scroll">
     <div id="sessions"></div>
     <div class="section-label">에이전트 · 스킬</div>
@@ -1552,45 +1599,248 @@ document.getElementById("ovSave").addEventListener("click", async () => {
 
 // ---------- 세션 관리 ----------
 
+let projectsCache = [];
+const collapsedProjects = new Set(JSON.parse(localStorage.getItem("ik8s-collapsed") || "[]"));
+
+function saveCollapsed() {
+  localStorage.setItem("ik8s-collapsed", JSON.stringify([...collapsedProjects]));
+}
+
+// 세션 항목 하나 (프로젝트 이동 메뉴 · 드래그 · 삭제 포함)
+function makeSessionItem(s) {
+  const item = document.createElement("div");
+  item.className = "sess" + (s.thread_id === threadId ? " active" : "");
+  item.draggable = true;
+  item.dataset.thread = s.thread_id;
+  const title = document.createElement("div");
+  title.className = "t";
+  title.textContent = s.title || "(새 대화)";
+  const meta = document.createElement("div");
+  meta.className = "m";
+  const tk = (s.tokens_in || 0) + (s.tokens_out || 0);
+  meta.textContent = `🤖 ${s.agent} · ${s.turns}턴`
+    + (tk ? ` · 🔢 ${fmtTk(tk)}tk` : "")
+    + ` · ${s.updated_at.slice(5, 16).replace("T", " ")}`;
+  if (s.thread_id === threadId) {
+    document.getElementById("sessTokens").textContent =
+      tk ? "🔢 " + fmtTk(s.tokens_in) + " in / " + fmtTk(s.tokens_out) + " out" : "";
+  }
+  // 프로젝트 이동 메뉴 (📁)
+  const move = document.createElement("button");
+  move.className = "moveBtn"; move.textContent = "📁"; move.title = "프로젝트로 이동";
+  move.addEventListener("click", (e) => { e.stopPropagation(); openMoveMenu(s, move); });
+  // 삭제 (2단계 확인)
+  const del = document.createElement("button");
+  del.className = "del"; del.textContent = "✕"; del.title = "세션 삭제 (한 번 더 누르면 확정)";
+  del.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (!del.classList.contains("arm")) {
+      del.classList.add("arm"); del.textContent = "확정?";
+      setTimeout(() => { del.classList.remove("arm"); del.textContent = "✕"; }, 2500);
+      return;
+    }
+    await fetch("/api/sessions/" + s.thread_id, { method: "DELETE" });
+    if (s.thread_id === threadId) await newSession(false);
+    refreshSessions();
+  });
+  item.append(title, meta, move, del);
+  item.addEventListener("click", () => switchSession(s.thread_id));
+  item.addEventListener("dragstart", (e) => {
+    e.dataTransfer.setData("text/plain", s.thread_id);
+    e.dataTransfer.effectAllowed = "move";
+    item.classList.add("dragging");
+  });
+  item.addEventListener("dragend", () => item.classList.remove("dragging"));
+  return item;
+}
+
+// 세션을 프로젝트로 이동하는 작은 메뉴 (프로젝트 목록 + 미분류)
+function openMoveMenu(s, anchor) {
+  document.querySelectorAll(".moveMenu").forEach(m => m.remove());
+  const menu = document.createElement("div");
+  menu.className = "moveMenu";
+  const opt = (label, pid) => {
+    const b = document.createElement("button");
+    b.textContent = label + (s.project_id === pid ? "  ✓" : "");
+    b.addEventListener("click", async (e) => {
+      e.stopPropagation(); menu.remove();
+      await fetch("/api/sessions/" + s.thread_id + "/project", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: pid }),
+      });
+      refreshSessions();
+    });
+    menu.appendChild(b);
+  };
+  opt("📥 미분류", "");
+  for (const p of projectsCache) opt("📁 " + p.name, p.id);
+  const nb = document.createElement("button");
+  nb.className = "moveNew"; nb.textContent = "＋ 새 프로젝트로…";
+  nb.addEventListener("click", async (e) => {
+    e.stopPropagation(); menu.remove();
+    const p = await createProjectFlow();
+    if (p) {
+      await fetch("/api/sessions/" + s.thread_id + "/project", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: p.id }),
+      });
+      refreshSessions();
+    }
+  });
+  menu.appendChild(nb);
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = Math.min(r.left, window.innerWidth - 200) + "px";
+  menu.style.top = (r.bottom + 4) + "px";
+  setTimeout(() => document.addEventListener("click", () => menu.remove(), { once: true }), 0);
+}
+
+async function createProjectFlow() {
+  // 인라인 입력행으로 프로젝트 이름 받기 (Electron prompt 미지원 대응)
+  return new Promise((resolve) => {
+    const row = document.createElement("div");
+    row.className = "projNewRow";
+    const inp = document.createElement("input");
+    inp.placeholder = "새 프로젝트 이름 — Enter 생성, Esc 취소";
+    row.appendChild(inp);
+    sessionsEl.prepend(row);
+    inp.focus();
+    const done = async (ok) => {
+      const name = inp.value.trim(); row.remove();
+      if (!ok || !name) { resolve(null); return; }
+      const p = await (await fetch("/api/projects", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      })).json();
+      resolve(p);
+    };
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); done(true); }
+      if (e.key === "Escape") { e.preventDefault(); done(false); }
+    });
+    inp.addEventListener("blur", () => setTimeout(() => done(true), 120));
+  });
+}
+
+// 프로젝트 헤더 (접기/펼치기 · 이름 변경 · 삭제 · 드롭 대상)
+function makeProjectHeader(proj, count) {
+  const head = document.createElement("div");
+  head.className = "projHead";
+  const collapsed = collapsedProjects.has(proj.id);
+  const caret = document.createElement("span");
+  caret.className = "projCaret"; caret.textContent = collapsed ? "▸" : "▾";
+  const name = document.createElement("span");
+  name.className = "projName"; name.textContent = proj.name;
+  const cnt = document.createElement("span");
+  cnt.className = "projCount"; cnt.textContent = count;
+  head.append(caret, name, cnt);
+  if (proj.id) {  // 실제 프로젝트만 이름변경·삭제 (미분류 그룹 제외)
+    const menu = document.createElement("button");
+    menu.className = "projMenu"; menu.textContent = "⋯"; menu.title = "이름 변경 / 삭제";
+    menu.addEventListener("click", (e) => { e.stopPropagation(); openProjectMenu(proj, menu); });
+    head.appendChild(menu);
+  }
+  head.addEventListener("click", () => {
+    if (collapsedProjects.has(proj.id)) collapsedProjects.delete(proj.id);
+    else collapsedProjects.add(proj.id);
+    saveCollapsed(); refreshSessions();
+  });
+  // 드롭: 세션을 이 프로젝트로 이동
+  head.addEventListener("dragover", (e) => { e.preventDefault(); head.classList.add("dropTarget"); });
+  head.addEventListener("dragleave", () => head.classList.remove("dropTarget"));
+  head.addEventListener("drop", async (e) => {
+    e.preventDefault(); head.classList.remove("dropTarget");
+    const thread = e.dataTransfer.getData("text/plain");
+    if (!thread) return;
+    await fetch("/api/sessions/" + thread + "/project", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project_id: proj.id }),
+    });
+    refreshSessions();
+  });
+  return head;
+}
+
+function openProjectMenu(proj, anchor) {
+  document.querySelectorAll(".moveMenu").forEach(m => m.remove());
+  const menu = document.createElement("div");
+  menu.className = "moveMenu";
+  const rename = document.createElement("button");
+  rename.textContent = "✎ 이름 변경";
+  rename.addEventListener("click", (e) => {
+    e.stopPropagation(); menu.remove();
+    const head = anchor.closest(".projHead");
+    const nameEl = head.querySelector(".projName");
+    const inp = document.createElement("input");
+    inp.className = "projRenameInput"; inp.value = proj.name;
+    nameEl.replaceWith(inp); inp.focus(); inp.select();
+    const save = async (ok) => {
+      const v = inp.value.trim();
+      if (ok && v && v !== proj.name) {
+        await fetch("/api/projects/" + proj.id, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: v }),
+        });
+      }
+      refreshSessions();
+    };
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); save(true); }
+      if (e.key === "Escape") { e.preventDefault(); save(false); }
+    });
+    inp.addEventListener("blur", () => save(true));
+    inp.addEventListener("click", e => e.stopPropagation());
+  });
+  const del = document.createElement("button");
+  del.className = "moveDel"; del.textContent = "🗑 프로젝트 삭제 (세션은 유지)";
+  del.addEventListener("click", async (e) => {
+    e.stopPropagation(); menu.remove();
+    await fetch("/api/projects/" + proj.id, { method: "DELETE" });
+    refreshSessions();
+  });
+  menu.append(rename, del);
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = Math.min(r.left, window.innerWidth - 220) + "px";
+  menu.style.top = (r.bottom + 4) + "px";
+  setTimeout(() => document.addEventListener("click", () => menu.remove(), { once: true }), 0);
+}
+
 async function refreshSessions() {
   const res = await fetch("/api/sessions");
   const data = await res.json();
+  projectsCache = data.projects || [];
   sessionsEl.innerHTML = "";
+
+  // 세션을 프로젝트별로 묶는다 (미분류는 마지막)
+  const byProject = new Map();
+  for (const p of projectsCache) byProject.set(p.id, []);
+  const unfiled = [];
   for (const s of data.sessions) {
-    const item = document.createElement("div");
-    item.className = "sess" + (s.thread_id === threadId ? " active" : "");
-    const title = document.createElement("div");
-    title.className = "t";
-    title.textContent = s.title || "(새 대화)";
-    const meta = document.createElement("div");
-    meta.className = "m";
-    const tk = (s.tokens_in || 0) + (s.tokens_out || 0);
-    meta.textContent = `🤖 ${s.agent} · ${s.turns}턴`
-      + (tk ? ` · 🔢 ${fmtTk(tk)}tk` : "")
-      + ` · ${s.updated_at.slice(5, 16).replace("T", " ")}`;
-    if (s.thread_id === threadId) {
-      document.getElementById("sessTokens").textContent =
-        tk ? "🔢 " + fmtTk(s.tokens_in) + " in / " + fmtTk(s.tokens_out) + " out" : "";
+    if (s.project_id && byProject.has(s.project_id)) byProject.get(s.project_id).push(s);
+    else unfiled.push(s);
+  }
+
+  const renderGroup = (proj, list) => {
+    sessionsEl.appendChild(makeProjectHeader(proj, list.length));
+    if (collapsedProjects.has(proj.id)) return;
+    const box = document.createElement("div");
+    box.className = "projBody";
+    if (!list.length) {
+      const empty = document.createElement("div");
+      empty.className = "projEmpty"; empty.textContent = "여기로 세션을 끌어다 놓으세요";
+      box.appendChild(empty);
     }
-    const del = document.createElement("button");
-    del.className = "del";
-    del.textContent = "✕";
-    del.title = "세션 삭제 (한 번 더 누르면 확정)";
-    del.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (!del.classList.contains("arm")) {           // 2단계 확인 (confirm 대화상자 미사용)
-        del.classList.add("arm");
-        del.textContent = "확정?";
-        setTimeout(() => { del.classList.remove("arm"); del.textContent = "✕"; }, 2500);
-        return;
-      }
-      await fetch("/api/sessions/" + s.thread_id, { method: "DELETE" });
-      if (s.thread_id === threadId) await newSession(false);
-      refreshSessions();
-    });
-    item.append(title, meta, del);
-    item.addEventListener("click", () => switchSession(s.thread_id));
-    sessionsEl.appendChild(item);
+    for (const s of list) box.appendChild(makeSessionItem(s));
+    sessionsEl.appendChild(box);
+  };
+
+  for (const p of projectsCache) renderGroup(p, byProject.get(p.id));
+  // 미분류: 프로젝트가 하나라도 있으면 헤더로 표시, 없으면 그냥 평면 목록
+  if (projectsCache.length) {
+    renderGroup({ id: "", name: "미분류" }, unfiled);
+  } else {
+    for (const s of unfiled) sessionsEl.appendChild(makeSessionItem(s));
   }
 }
 
@@ -1647,6 +1897,10 @@ async function newSession(load = true) {
 }
 
 document.getElementById("newSession").addEventListener("click", () => newSession());
+document.getElementById("newProject").addEventListener("click", async () => {
+  await createProjectFlow();
+  refreshSessions();
+});
 
 // ---------- 채팅 ----------
 

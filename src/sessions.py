@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,18 @@ class SessionMeta:
     agent: str
     tokens_in: int
     tokens_out: int
+    project_id: str = ""   # 소속 프로젝트 id ("" = 미분류)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ProjectMeta:
+    id: str
+    name: str
+    created_at: str
+    sort_order: int
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -56,17 +69,89 @@ class SessionStore:
                 )
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS projects (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
             # 구버전 DB 마이그레이션: 없는 컬럼 추가
             cols = {r[1] for r in self._conn.execute("PRAGMA table_info(sessions)").fetchall()}
             migrations = {
                 "agent": "ALTER TABLE sessions ADD COLUMN agent TEXT NOT NULL DEFAULT 'inspector'",
                 "tokens_in": "ALTER TABLE sessions ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0",
                 "tokens_out": "ALTER TABLE sessions ADD COLUMN tokens_out INTEGER NOT NULL DEFAULT 0",
+                "project_id": "ALTER TABLE sessions ADD COLUMN project_id TEXT NOT NULL DEFAULT ''",
             }
             for col, ddl in migrations.items():
                 if col not in cols:
                     self._conn.execute(ddl)
             self._conn.commit()
+
+    # ---- 프로젝트 (세션 묶음) ----
+    def create_project(self, name: str) -> ProjectMeta:
+        pid = "p-" + uuid.uuid4().hex[:10]
+        now = _now()
+        clean = (name or "새 프로젝트").strip().replace("\n", " ")[:80] or "새 프로젝트"
+        with self._lock:
+            nxt = self._conn.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM projects"
+            ).fetchone()[0]
+            self._conn.execute(
+                "INSERT INTO projects (id, name, created_at, sort_order) VALUES (?, ?, ?, ?)",
+                (pid, clean, now, nxt),
+            )
+            self._conn.commit()
+        return ProjectMeta(id=pid, name=clean, created_at=now, sort_order=nxt)
+
+    def rename_project(self, project_id: str, name: str) -> bool:
+        clean = (name or "").strip().replace("\n", " ")[:80]
+        if not clean:
+            return False
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE projects SET name = ? WHERE id = ?", (clean, project_id)
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def remove_project(self, project_id: str) -> bool:
+        """프로젝트를 삭제한다. 소속 세션은 미분류(project_id='')로 되돌린다(세션은 유지)."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE sessions SET project_id = '' WHERE project_id = ?", (project_id,)
+            )
+            cur = self._conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def list_projects(self) -> list[ProjectMeta]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, name, created_at, sort_order FROM projects "
+                "ORDER BY sort_order, created_at"
+            ).fetchall()
+        return [ProjectMeta(*row) for row in rows]
+
+    def assign_project(self, thread_id: str, project_id: str) -> bool:
+        """세션을 프로젝트로 옮긴다. project_id='' 이면 미분류로 뺀다."""
+        with self._lock:
+            if project_id:
+                exists = self._conn.execute(
+                    "SELECT 1 FROM projects WHERE id = ?", (project_id,)
+                ).fetchone()
+                if not exists:
+                    return False
+            cur = self._conn.execute(
+                "UPDATE sessions SET project_id = ? WHERE thread_id = ?",
+                (project_id, thread_id),
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
 
     def add_usage(self, thread_id: str, tokens_in: int, tokens_out: int) -> None:
         """run 종료 후 세션 누적 토큰 사용량을 더한다."""
@@ -112,7 +197,7 @@ class SessionStore:
     def get(self, thread_id: str) -> SessionMeta | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT thread_id, title, created_at, updated_at, turns, agent, tokens_in, tokens_out "
+                "SELECT thread_id, title, created_at, updated_at, turns, agent, tokens_in, tokens_out, project_id "
                 "FROM sessions WHERE thread_id = ?",
                 (thread_id,),
             ).fetchone()
@@ -121,7 +206,7 @@ class SessionStore:
     def list(self, limit: int = 100) -> list[SessionMeta]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT thread_id, title, created_at, updated_at, turns, agent, tokens_in, tokens_out "
+                "SELECT thread_id, title, created_at, updated_at, turns, agent, tokens_in, tokens_out, project_id "
                 "FROM sessions ORDER BY updated_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
