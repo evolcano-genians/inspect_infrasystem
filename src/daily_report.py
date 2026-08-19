@@ -154,13 +154,40 @@ def _inline(text: str) -> str:
     return s
 
 
-def publish(base_url: str, user: str, token: str, space_key: str, title: str,
-            storage_html: str, *, verify_tls: bool = True) -> dict:
-    """개인 스페이스에 하루 1건 게시(있으면 갱신). 반환: {url, action}."""
+def _auth_header(user: str, token: str) -> dict:
+    a = "Basic " + base64.b64encode(f"{user}:{token}".encode()).decode()
+    return {"Authorization": a, "Accept": "application/json", "Content-Type": "application/json"}
+
+
+def ensure_folder(base_url: str, user: str, token: str, space_key: str, folder_title: str,
+                  *, verify_tls: bool = True) -> str:
+    """개인 스페이스에 전용 부모 페이지(폴더)를 보장하고 그 id를 반환한다. 없으면 생성."""
     import httpx
 
-    auth = "Basic " + base64.b64encode(f"{user}:{token}".encode()).decode()
-    H = {"Authorization": auth, "Accept": "application/json", "Content-Type": "application/json"}
+    H = _auth_header(user, token)
+    with httpx.Client(timeout=30, verify=verify_tls) as c:
+        found = c.get(f"{base_url}/wiki/rest/api/content", headers=H,
+                      params={"spaceKey": space_key, "title": folder_title})
+        res = (found.json().get("results") or []) if found.status_code == 200 else []
+        if res:
+            return res[0]["id"]
+        intro = ("<p>inspect-k8s 하네스가 매일 자동으로 올리는 <strong>작업 복귀용 일일 요약</strong> "
+                 "모음입니다. 이 개인 스페이스는 비공개이며 본인만 볼 수 있습니다.</p>")
+        r = c.post(f"{base_url}/wiki/rest/api/content", headers=H, json={
+            "type": "page", "title": folder_title, "space": {"key": space_key},
+            "body": {"storage": {"value": intro, "representation": "storage"}},
+        })
+        if r.status_code not in (200, 201):
+            raise RuntimeError(f"폴더 생성 실패 status={r.status_code}: {r.text[:200]}")
+        return r.json()["id"]
+
+
+def publish(base_url: str, user: str, token: str, space_key: str, title: str,
+            storage_html: str, *, parent_id: str = "", verify_tls: bool = True) -> dict:
+    """개인 스페이스(전용 폴더 하위)에 하루 1건 게시(있으면 갱신). 반환: {url, action}."""
+    import httpx
+
+    H = _auth_header(user, token)
     with httpx.Client(timeout=40, verify=verify_tls) as c:
         # 같은 제목의 문서가 이미 있으면 갱신(버전+1)
         found = c.get(f"{base_url}/wiki/rest/api/content",
@@ -171,16 +198,17 @@ def publish(base_url: str, user: str, token: str, space_key: str, title: str,
         if existing:
             page = existing[0]
             ver = (page.get("version") or {}).get("number", 1) + 1
-            r = c.put(f"{base_url}/wiki/rest/api/content/{page['id']}", headers=H, json={
-                "id": page["id"], "type": "page", "title": title,
-                "space": {"key": space_key}, "version": {"number": ver},
-                "body": body,
-            })
+            payload = {"id": page["id"], "type": "page", "title": title,
+                       "space": {"key": space_key}, "version": {"number": ver}, "body": body}
+            if parent_id:
+                payload["ancestors"] = [{"id": parent_id}]
+            r = c.put(f"{base_url}/wiki/rest/api/content/{page['id']}", headers=H, json=payload)
             action = "updated"
         else:
-            r = c.post(f"{base_url}/wiki/rest/api/content", headers=H, json={
-                "type": "page", "title": title, "space": {"key": space_key}, "body": body,
-            })
+            payload = {"type": "page", "title": title, "space": {"key": space_key}, "body": body}
+            if parent_id:
+                payload["ancestors"] = [{"id": parent_id}]
+            r = c.post(f"{base_url}/wiki/rest/api/content", headers=H, json=payload)
             action = "created"
         if r.status_code not in (200, 201):
             raise RuntimeError(f"게시 실패 status={r.status_code}: {r.text[:300]}")
@@ -242,8 +270,12 @@ def run(*, day: str | None = None, dry_run: bool = False) -> dict:
         return {"ok": False, "error": "JIRA_USER/JIRA_TOKEN(Confluence 공유)이 필요합니다"}
 
     space = _personal_space_key(base, user, token, settings.jira_verify_tls)
-    res = publish(base, user, token, space, title, storage, verify_tls=settings.jira_verify_tls)
-    return {"ok": True, "turns": len(turns), "projects": len(groups), **res}
+    # 전용 폴더(부모 페이지) 하위에 넣어 워크스페이스를 깔끔하게 유지 (개인 스페이스라 비공개)
+    folder_id = ensure_folder(base, user, token, space, "inspect-k8s 일일요약",
+                              verify_tls=settings.jira_verify_tls)
+    res = publish(base, user, token, space, title, storage,
+                  parent_id=folder_id, verify_tls=settings.jira_verify_tls)
+    return {"ok": True, "turns": len(turns), "projects": len(groups), "folder_id": folder_id, **res}
 
 
 def main() -> int:
