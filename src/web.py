@@ -334,6 +334,14 @@ def make_app(
         extra_tools = [*extra_tools, *make_web_test_tools(audit=audit)]
     except Exception as exc:
         print(f"경고: 웹 테스트 도구 비활성화 — {type(exc).__name__}: {exc}")
+    # 웹 검색·문서 조회 — 항상 노출. 결과는 신뢰 불가 데이터로, SSRF 게이트(사설/메타데이터 거부)가
+    # 적용된다. 찾은 방법은 sandbox_bash로 검증 후에만 사실로 답하도록 프롬프트가 유도한다.
+    try:
+        from .tools.web_search import make_web_search_tools
+
+        extra_tools = [*extra_tools, *make_web_search_tools(audit=audit)]
+    except Exception as exc:
+        print(f"경고: 웹 검색 도구 비활성화 — {type(exc).__name__}: {exc}")
     # Trino 데이터 분석 도구 (TRINO_ENDPOINT 설정 시)
     if settings.trino_endpoint:
         from .tools.trino_reader import TrinoConfig, make_trino_tools

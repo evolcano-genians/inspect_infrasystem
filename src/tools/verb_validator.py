@@ -101,7 +101,7 @@ _RESOURCE_ARGS = frozenset({"resource"})        # 비교 리소스 종류 (list_
 _RESOURCE_RE = re.compile(r"^[a-z]{1,32}$")
 # 자유 텍스트 인자 → 길이 상한만. 실검증은 도구 내부(SQL 파서·샌드박스 격리)가 수행.
 _FREETEXT_ARGS: dict[str, int] = {"sql": 20_000, "command": 10_000, "instruction": 2_000,
-                                  "jql": 2_000}
+                                  "jql": 2_000, "query": 500}
 # Jira 이슈 키(또는 browse URL) — jira_reader 내부에서 키를 재추출·검증한다.
 _JIRA_KEY_ARGS = frozenset({"key"})
 _JIRA_KEY_RE = re.compile(r"^[A-Za-z0-9:/._\-]{1,200}$")  # 키 또는 https://.../browse/KEY

@@ -57,9 +57,11 @@ def _all_tool_names() -> set[str]:
     jira_tools = make_jira_tools(JiraConfig(base_url="https://jira.example.com", token="t"))
     from src.tools.web_test import make_web_test_tools
     web_tools = make_web_test_tools()
+    from src.tools.web_search import make_web_search_tools
+    search_tools = make_web_search_tools()
     return {t.name for t in [
         *k8s_tools, *src_tools, *sec_tools, *trino_tools, *shell_tools, *multi_tools, *jira_tools,
-        *web_tools,
+        *web_tools, *search_tools,
     ]}
 
 
@@ -177,6 +179,8 @@ _REPRESENTATIVE_ARGS: dict[str, dict] = {
     "k8s_list_cluster_role_bindings": {"include_system": False},
     "k8s_get_role": {"name": "admin", "namespace": ""},
     "k8s_oss_inventory": {"namespace": "", "include_internal": False},
+    "web_search": {"query": "kubectl field selector"},
+    "web_fetch": {"url": "https://trino.io/docs/current/"},
 }
 
 
