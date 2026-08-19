@@ -18,6 +18,7 @@ OpenHands의 컨테이너 격리 패턴을 따르되, 이 프로젝트의 2계�
 
 from __future__ import annotations
 
+import os
 import shlex
 from dataclasses import dataclass
 
@@ -26,7 +27,10 @@ ALLOWED_NETWORKS: frozenset[str] = frozenset({"none", "kind"})
 #: 컨테이너 env로 절대 전달하지 않는 자격증명성 키 접두사
 _CREDENTIAL_ENV_PREFIXES = ("KUBECONFIG", "AWS_", "AZURE_", "GOOGLE_", "GCP_", "DOCKER_",
                             "SSH_", "GIT_", "OPENAI_", "ANTHROPIC_", "KUBE_")
-_DEFAULT_IMAGE = "alpine:latest"
+# 기본 이미지는 alpine(경량). 코드 실증에 런타임이 필요하면 SANDBOX_IMAGE 로 바꾼다
+# (예: python:3.12-slim, node:20-alpine). 격리 원칙(자격증명 무마운트·네트워크 화이트리스트·
+# non-root·read-only)은 이미지와 무관하게 동일하게 강제된다.
+_DEFAULT_IMAGE = os.environ.get("SANDBOX_IMAGE", "alpine:latest")
 _MAX_OUTPUT = 40_000
 
 
