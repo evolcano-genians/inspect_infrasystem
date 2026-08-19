@@ -63,6 +63,8 @@ class Settings:
     trino_catalog: str = ""
     trino_schema: str = ""
     shell_envs: dict = field(default_factory=dict)  # nexus-shell HTTP 조사 환경 (SHELL_*)
+    curator_enabled: bool = False  # 위키 큐레이터 주기 실행 (CURATOR_ENABLED)
+    curator_interval_s: int = 6 * 3600  # 큐레이션 사이클 간격(초, CURATOR_INTERVAL_S)
 
 
 def load_settings(root: Path | None = None) -> Settings:
@@ -88,6 +90,8 @@ def load_settings(root: Path | None = None) -> Settings:
         trino_catalog=os.environ.get("TRINO_CATALOG", ""),
         trino_schema=os.environ.get("TRINO_SCHEMA", ""),
         shell_envs=_load_shell_envs(),
+        curator_enabled=_truthy(os.environ.get("CURATOR_ENABLED")),
+        curator_interval_s=int(os.environ.get("CURATOR_INTERVAL_S", str(6 * 3600))),
     )
 
 

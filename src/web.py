@@ -285,6 +285,17 @@ def make_app(
     # 같은 thread_id 동시 호출과 sqlite 경합을 코드 레벨에서 차단한다.
     invoke_lock = threading.Lock()
 
+    # 위키 큐레이터: durable 큐 + 주기 스케줄러 (CURATOR_ENABLED=1 시 백그라운드 실행)
+    from .curator import CuratorQueue, run_cycle
+    from .nodes.wiki_writer import redact_text as _redact
+
+    curator_queue = CuratorQueue(settings.checkpoint_db.parent / "curator.sqlite")
+
+    def _run_curator_cycle() -> dict:
+        # LLM·wiki 편집이 얽히므로 그래프 락과 공유해 sqlite/파일 경합을 막는다.
+        with invoke_lock:
+            return run_cycle(curator_queue, settings.wiki_dir, reflect_model, redactor=_redact)
+
     app = FastAPI(title="inspect-k8s web harness", docs_url=None, redoc_url=None)
 
     @app.get("/")
@@ -561,6 +572,30 @@ def make_app(
         )
         return JSONResponse(result)
 
+    # ---------- 위키 큐레이터 (LLM 주기 보정: 사실체크·폐기·중복정리) ----------
+    @app.get("/api/curator")
+    def curator_status() -> JSONResponse:
+        return JSONResponse({
+            "enabled": settings.curator_enabled,
+            "interval_s": settings.curator_interval_s,
+            "queue": curator_queue.stats(),
+            "journal": curator_queue.journal(30),
+        })
+
+    @app.post("/api/curator/run")
+    def curator_run() -> JSONResponse:
+        """지금 한 사이클을 수동 실행한다(계획→큐잉→처리)."""
+        try:
+            return JSONResponse(_run_curator_cycle())
+        except Exception as exc:
+            return JSONResponse(
+                {"error": f"{type(exc).__name__}: {exc}"}, status_code=502)
+
+    @app.post("/api/curator/revive")
+    def curator_revive() -> JSONResponse:
+        """dead 잡을 되살린다(수동 회생)."""
+        return JSONResponse({"revived": curator_queue.revive_dead()})
+
     # ---------- 세션별 작업 관리 ----------
     # 대화 context는 thread_id별 checkpointer가 보존한다. 아래 API는 그 위의
     # 메타데이터(목록·제목·이력 복원)만 다룬다.
@@ -795,6 +830,30 @@ def make_app(
             yield _sse({"type": "done"})
 
         return StreamingResponse(stream(), media_type="text/event-stream")
+
+    # 큐레이터 주기 스케줄러 (opt-in) — 백그라운드 데몬 스레드로 사이클을 반복한다.
+    # 실패한 잡은 durable 큐가 백오프로 흡수하므로 스레드가 죽지 않는 한 언젠가 완료된다.
+    if settings.curator_enabled:
+        stop_event = threading.Event()
+
+        def _curator_loop() -> None:
+            # 시작 직후 한 번 짧게 대기(서버 안정화) 후 주기 실행
+            if stop_event.wait(60):
+                return
+            while not stop_event.is_set():
+                try:
+                    summary = _run_curator_cycle()
+                    print(f"[curator] 사이클 완료 — {summary}")
+                except Exception as exc:  # 사이클 전체 실패도 다음 주기에 재시도
+                    print(f"[curator] 사이클 오류(다음 주기 재시도): {type(exc).__name__}: {exc}")
+                stop_event.wait(max(60, settings.curator_interval_s))
+
+        threading.Thread(target=_curator_loop, name="wiki-curator", daemon=True).start()
+
+        @app.on_event("shutdown")
+        def _stop_curator() -> None:
+            stop_event.set()
+            curator_queue.close()
 
     return app
 
