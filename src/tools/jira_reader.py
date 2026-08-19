@@ -22,8 +22,18 @@ from dataclasses import dataclass, field
 
 _ISSUE_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
 _BROWSE_RE = re.compile(r"/browse/([A-Z][A-Z0-9]+-\d+)")
-# 댓글·본문에서 SVN 리비전과 CL 참조를 뽑는다 (리뷰 대상 변경 추적용)
-_REVISION_RE = re.compile(r"\br(\d{2,7})\b|\b(?:revision|리비전|rev)\s*[:#]?\s*(\d{2,7})\b", re.IGNORECASE)
+# 댓글·본문에서 SVN 리비전을 뽑는다 (리뷰 대상 변경 추적용).
+# 실제 커밋 알림 댓글은 Fisheye 링크 형식이다: `*Revision:* [7797|https://fisheye…/?cs=7797]`
+# → 키워드와 숫자 사이의 `:`/`*`/`[`/공백을 폭넓게 허용해야 잡힌다. `r7797` 형태도 함께 지원.
+_REVISION_RE = re.compile(
+    r"\br(\d{2,7})\b"                                        # r7797
+    r"|\b(?:revision|리비전|rev)\b[\s:#*\[\]]*(\d{2,7})\b"    # *Revision:* [7797|…]
+    r"|[?&]cs=(\d{2,7})\b",                                  # fisheye …/?cs=7797
+    re.IGNORECASE,
+)
+# 커밋 알림 댓글의 Diffstat 블록 — 실제 변경된 파일 경로가 여기 있다(리뷰 범위의 핵심).
+_DIFFSTAT_RE = re.compile(r"\{noformat\}(.*?)(?:\{noformat\}|$)", re.DOTALL)
+_PATH_LINE_RE = re.compile(r"^\s*([A-Za-z0-9._/\-]+/[A-Za-z0-9._/\-]+)\s*\|")
 _MAX_OUTPUT = 24_000
 _TIMEOUT = 20
 
@@ -70,10 +80,29 @@ def find_revisions(text: str) -> list[str]:
     """텍스트에서 SVN 리비전(r####)·리비전 번호를 중복 없이 뽑는다."""
     out: list[str] = []
     for m in _REVISION_RE.finditer(text or ""):
-        rev = m.group(1) or m.group(2)
+        rev = m.group(1) or m.group(2) or m.group(3)
         if rev and f"r{rev}" not in out:
             out.append(f"r{rev}")
     return out
+
+
+def find_changed_paths(text: str, limit: int = 40) -> list[str]:
+    """커밋 알림 댓글의 Diffstat 블록에서 변경된 파일 경로를 뽑는다.
+
+    Fisheye 알림 댓글은 `{noformat}경로 | 변경량{noformat}` 형태로 변경 파일을 나열한다.
+    이 목록이 곧 **리뷰해야 할 범위**라, 리뷰어가 src_read_file 로 바로 열어볼 수 있게 한다.
+    """
+    paths: list[str] = []
+    for block in _DIFFSTAT_RE.findall(text or ""):
+        for line in block.splitlines():
+            m = _PATH_LINE_RE.match(line)
+            if m:
+                p = m.group(1)
+                if p not in paths:
+                    paths.append(p)
+                    if len(paths) >= limit:
+                        return paths
+    return paths
 
 
 def _adf_or_text(value) -> str:
@@ -299,6 +328,7 @@ def make_jira_tools(config: JiraConfig, audit=None, redactor=None) -> list:
         # 본문+댓글에서 리뷰 대상 SVN 리비전을 추출해 리뷰어가 바로 대조하게 한다
         blob = issue["description"] + "\n" + "\n".join(c["body"] for c in comments)
         revisions = find_revisions(blob)
+        changed = find_changed_paths(blob)
 
         lines = [
             f"# {issue['key']}: {issue['summary']}",
@@ -316,8 +346,14 @@ def make_jira_tools(config: JiraConfig, audit=None, redactor=None) -> list:
         if issue["subtasks"]:
             lines.append("하위: " + ", ".join(issue["subtasks"]))
         if revisions:
-            lines.append("★ 변경 리비전 추정(댓글·본문): " + ", ".join(revisions)
-                         + "  → src_repo_log 로 SVN helm 변경을 대조하라")
+            lines.append("★ 변경 리비전(댓글의 커밋 알림): " + ", ".join(revisions)
+                         + "  → src_repo_log 로 SVN 변경 이력을 대조하라")
+        if changed:
+            lines.append("★ 변경 파일 " + str(len(changed)) + "개 (리뷰 범위 — src_read_file 로 열어보라):")
+            for p in changed[:25]:
+                lines.append("   - " + p)
+            if len(changed) > 25:
+                lines.append(f"   … 외 {len(changed) - 25}개")
         lines.append("\n## 설명\n" + (issue["description"] or "(없음)"))
         if comments:
             lines.append("\n## 댓글 (" + str(len(comments)) + "개)")

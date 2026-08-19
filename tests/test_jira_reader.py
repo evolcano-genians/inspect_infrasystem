@@ -30,6 +30,26 @@ def test_find_revisions_from_comment_text():
     assert revs.count("r7911") == 1  # 중복 제거
 
 
+def test_find_revisions_fisheye_commit_notification():
+    """실제 커밋 알림 댓글 형식(Fisheye 링크)에서 리비전을 뽑아야 한다."""
+    body = ("*Source code commit notification (CLOUD / RELEASE)*\n"
+            "*Revision:* [7797|https://fisheye.geninetworks.com/changelog/CLOUD/?cs=7797]\n")
+    assert find_revisions(body) == ["r7797"]
+
+
+def test_find_changed_paths_from_diffstat():
+    """Diffstat 블록에서 변경 파일 경로(=리뷰 범위)를 뽑아야 한다."""
+    from src.tools.jira_reader import find_changed_paths
+
+    body = ("*Diffstat:*\n\n{noformat}trunk                       |    2\n"
+            "trunk/kube/helm/gpe-tenant/middleware.yaml   |   19 +\n"
+            "trunk/kube/helm/gpe-tenant/scripts/enable.sh |    4\n{noformat}")
+    paths = find_changed_paths(body)
+    assert "trunk/kube/helm/gpe-tenant/middleware.yaml" in paths
+    assert "trunk/kube/helm/gpe-tenant/scripts/enable.sh" in paths
+    assert "trunk" not in paths  # 디렉터리 한 조각짜리는 경로로 보지 않는다
+
+
 class FakeResp:
     def __init__(self, status, payload=None, headers=None):
         self.status_code = status
